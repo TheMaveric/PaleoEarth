@@ -220,6 +220,31 @@ function initEarth() {
             }
             p.el.style.opacity = '0'; setTimeout(() => p.el.style.display = 'none', 300);
         });
+        // --- NEW: Track Settlement Labels ---
+        settlements.forEach(s => {
+            if (!s.active) return;
+            // Get absolute world position of the city mesh
+            let tv = new THREE.Vector3();
+            s.mesh.getWorldPosition(tv);
+            
+            let show = false;
+            if (s.parent === earthM && is2DView) show = true;
+            else if (s.parent === earthG && !is2DView) {
+                // Check if it's on the front side of the globe
+                if (new THREE.Vector3().subVectors(camera.position, tv).dot(tv.clone().normalize()) > 0) show = true;
+            }
+
+            if (show) { 
+                tv.project(camera); 
+                if (tv.z < 1.0) { 
+                    s.el.style.left = `${(tv.x * .5 + .5) * window.innerWidth}px`; 
+                    s.el.style.top = `${(tv.y * -.5 + .5) * window.innerHeight - 15}px`; 
+                    s.el.style.display = 'block'; 
+                    return; 
+                } 
+            }
+            s.el.style.display = 'none';
+        });
 
         if (cloudG) {
             const cl = getClimate(yr), ash = Math.exp(-Math.pow((yr + 74000) / 2000, 2));
@@ -234,6 +259,115 @@ function initEarth() {
     setInterval(() => { const e = physicsEngine.getEcc(); $('data-ecc').innerText = e.toFixed(4); $('bar-ecc').style.width = ((e - 0.0034) / 0.0546) * 100 + "%"; }, 100);
     updateSimulation();
 }
+
+// ==========================================
+// GAME MECHANICS: SETTLEMENTS & SURVIVAL
+// ==========================================
+let settlements = [];
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+
+// 1. Double Click to Settle
+window.addEventListener('dblclick', (event) => {
+    // Ignore clicks if they are on the UI panels
+    if (event.clientY > window.innerHeight - 150) return; 
+
+    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+    raycaster.setFromCamera(mouse, camera);
+    // Raycast against the currently visible Earth (3D or 2D)
+    const intersects = raycaster.intersectObject(is2DView ? earthM : earthG);
+
+    if (intersects.length > 0) {
+        const point = intersects[0].point;
+        
+        // Calculate rough latitude for climate survival math
+        let lat = 0;
+        if (is2DView) {
+            lat = (point.y / 1.0) * 90; // 2D map height is 2.0 (-1 to 1)
+        } else {
+            lat = Math.asin(point.y / 1.0) * (180 / Math.PI); // 3D Sphere radius is 1.0
+        }
+
+        // Spawn City Mesh
+        const geo = new THREE.SphereGeometry(0.015, 8, 8);
+        const mat = new THREE.MeshBasicMaterial({ color: 0x22c55e }); // Start Green
+        const mesh = new THREE.Mesh(geo, mat);
+        
+        // Attach the city to the actual globe/map so it rotates/pans with it
+        mesh.position.copy(is2DView ? point : earthG.worldToLocal(point.clone()));
+        (is2DView ? earthM : earthG).add(mesh);
+
+        // Spawn Population Label
+        const el = document.createElement('div');
+        el.className = 'absolute text-[10px] font-mono text-green-400 font-bold pointer-events-none drop-shadow-[0_0_3px_rgba(0,0,0,1)] transition-colors duration-300';
+        el.innerText = '100';
+        $('poi-container').appendChild(el);
+
+        settlements.push({ lat: lat, mesh: mesh, el: el, pop: 100, active: true, parent: is2DView ? earthM : earthG });
+    }
+});
+
+// 2. The Game Loop (Runs 10x a second)
+setInterval(() => {
+    // Update N-Body UI (Existing code)
+    const e = physicsEngine.getEcc(); 
+    $('data-ecc').innerText = e.toFixed(4); 
+    $('bar-ecc').style.width = ((e - 0.0034) / 0.0546) * 100 + "%"; 
+
+    // --- NEW: Settlement Survival Logic ---
+    let totalPop = 0;
+    const currentYear = sliderToYear(parseFloat($('slider-year').value));
+    const currentTemp = getClimate(currentYear).t;
+    const isHolocene = (currentYear < -2000 && currentYear > -10000); // Green Sahara Era
+    
+    settlements.forEach(s => {
+        if (!s.active) return;
+        
+        let growthRate = 1.02; // Base +2% growth
+        let statusColor = 0x22c55e; // Green
+        let textColor = 'text-green-400';
+
+        // HARSH CLIMATE RULES
+        if (Math.abs(s.lat) > 45 && currentTemp < -3.0) {
+            // ICE AGE DEATH: High latitudes freeze during glacial maximums
+            growthRate = 0.85; // -15% death rate
+            statusColor = 0x3b82f6; // Blue (Freezing)
+            textColor = 'text-blue-400';
+        } 
+        else if (Math.abs(s.lat) > 15 && Math.abs(s.lat) < 35 && !isHolocene) {
+            // DESERTIFICATION DEATH: Sahara/Arabia without the Holocene Optimum
+            growthRate = 0.90; // -10% death rate
+            statusColor = 0xef4444; // Red (Starving)
+            textColor = 'text-red-400';
+        }
+        else if (isHolocene && Math.abs(s.lat) > 10 && Math.abs(s.lat) < 35) {
+            // GOLDEN AGE: Massive growth in the Green Sahara!
+            growthRate = 1.15; // +15% explosion!
+            statusColor = 0xfbbf24; // Gold (Thriving)
+            textColor = 'text-amber-400';
+        }
+
+        // Apply Math
+        s.pop = s.pop * growthRate;
+        s.mesh.material.color.setHex(statusColor);
+        s.el.className = `absolute text-[10px] font-mono font-bold pointer-events-none drop-shadow-[0_0_3px_rgba(0,0,0,1)] ${textColor}`;
+
+        // Collapse Condition
+        if (s.pop < 1) { 
+            s.active = false; 
+            s.pop = 0; 
+            s.el.style.opacity = 0; 
+            s.mesh.visible = false; 
+        } else { 
+            s.el.innerText = Math.floor(s.pop).toLocaleString(); 
+            totalPop += Math.floor(s.pop); 
+        }
+    });
+
+    $('data-pop').innerText = totalPop.toLocaleString();
+}, 100);
 
 function updateSimulation() {
     const yr = sliderToYear(parseFloat($('slider-year').value)), mo = parseFloat($('slider-month').value), cl = getClimate(yr);
