@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PaleoEarth: Academic Geological & Climate Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; color: white; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        #canvas-container { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 1; }
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 10; pointer-events: none; }
+        .pointer-events-auto { pointer-events: auto; }
+        
+        input[type=range] { -webkit-appearance: none; width: 100%; background: transparent; }
+        input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; height: 12px; width: 12px; border-radius: 50%; background: #3b82f6; cursor: pointer; margin-top: -4px; box-shadow: 0 0 8px rgba(59, 130, 246, 0.8); }
+        input[type=range]::-webkit-slider-runnable-track { width: 100%; height: 3px; cursor: pointer; background: rgba(255, 255, 255, 0.2); border-radius: 2px; }
+        input[type=range]:focus { outline: none; }
+        
+        #loading { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #050505; z-index: 50; display: flex; flex-direction: column; justify-content: center; align-items: center; transition: opacity 1s ease-out; }
+        .spinner { width: 50px; height: 50px; border: 3px solid rgba(255,255,255,0.1); border-radius: 50%; border-top-color: #3b82f6; animation: spin 1s ease-in-out infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .poi-marker { position: absolute; transform: translate(-50%, -50%); pointer-events: auto; cursor: pointer; opacity: 0; transition: opacity 0.3s ease; display: none; z-index: 20; }
+        .poi-dot { width: 12px; height: 12px; background-color: #ef4444; border-radius: 50%; box-shadow: 0 0 10px #ef4444, 0 0 0 2px rgba(0,0,0,0.5); border: 1px solid white; margin: 0 auto; animation: pulse 2s infinite; }
+        .poi-label { background: rgba(0,0,0,0.8); border: 1px solid rgba(255,255,255,0.2); backdrop-filter: blur(4px); padding: 4px 8px; border-radius: 4px; font-size: 11px; margin-top: 4px; text-align: center; white-space: nowrap; color: #ccc; }
+        .poi-marker:hover .poi-label { color: #fff; border-color: #ef4444; }
+        @keyframes pulse { 0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); } 70% { transform: scale(1.1); box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); } 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
+    </style>
+</head>
+<body>
+
+    <div id="loading">
+        <div class="spinner mb-4"></div>
+        <h1 class="text-2xl font-light tracking-widest text-blue-400">P A L E O <span class="text-white">E A R T H</span></h1>
+        <p class="text-gray-400 mt-2 text-sm" id="loading-text">Initializing N-Body Integrator & Fluid Dynamics...</p>
+    </div>
+
+    <div id="canvas-container"></div>
+    <div id="poi-container" style="position: absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index: 5;"></div>
+
+    <div id="ui-layer" class="flex flex-col justify-between p-2">
+        <div class="flex justify-between items-start pointer-events-auto">
+            <div>
+                <h1 class="text-xl font-light tracking-wider drop-shadow-lg">PALEO<span class="font-bold text-blue-400">EARTH</span></h1>
+                <p class="text-[9px] text-gray-300 drop-shadow">Academic Geological & Climate Simulator</p>
+                <div class="mt-1 flex items-center gap-1.5">
+                    <span class="relative flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span></span>
+                    <span class="text-[8px] font-mono text-red-400">LIVE N-BODY GRAVITY SIMULATION ACTIVE</span>
+                </div>
+            </div>
+            <div class="flex flex-col items-end gap-1">
+                <div class="flex flex-wrap justify-end gap-1 pointer-events-auto max-w-[400px]">
+                    <button id="toggle-spin" class="bg-white/10 hover:bg-white/20 text-[9px] px-1.5 py-0.5 rounded border border-white/20 transition">Pause Spin</button>
+                    <button id="toggle-view" class="bg-blue-500/50 hover:bg-blue-500/70 text-[9px] px-1.5 py-0.5 rounded border border-blue-400/50 transition shadow-[0_0_10px_rgba(59,130,246,0.5)]">2D Map View</button>
+                    <button id="toggle-data" class="bg-purple-500/50 hover:bg-purple-500/70 text-[9px] px-1.5 py-0.5 rounded border border-purple-400/50 transition shadow-[0_0_10px_rgba(168,85,247,0.5)]">Bathymetry</button>
+                    <button id="toggle-migration" class="bg-green-500/50 hover:bg-green-500/70 text-[9px] px-1.5 py-0.5 rounded border border-green-400/50 transition shadow-[0_0_10px_rgba(34,197,94,0.5)]">Migration Routes</button>
+                    <button id="toggle-clouds" class="bg-slate-500/50 hover:bg-slate-500/70 text-[9px] px-1.5 py-0.5 rounded border border-slate-400/50 transition shadow-[0_0_10px_rgba(148,163,184,0.5)]">Hide Clouds</button>
+                    <button id="toggle-astro" class="bg-amber-500/50 hover:bg-amber-500/70 text-[9px] px-1.5 py-0.5 rounded border border-amber-400/50 transition shadow-[0_0_10px_rgba(245,158,11,0.5)]">Hide Night Sky</button>
+                    <button id="toggle-ui" class="bg-gray-500/50 hover:bg-gray-500/70 text-[9px] px-1.5 py-0.5 rounded border border-gray-400/50 transition shadow-[0_0_10px_rgba(156,163,175,0.5)]">Hide Panels</button>
+                </div>
+                <div id="era-box" class="bg-black/80 border border-white/10 p-2 rounded-lg text-right min-w-[100px] transition-all duration-500 transform">
+                    <div class="text-[8px] text-gray-400 uppercase tracking-widest mb-0.5">Current Era</div>
+                    <div id="display-year" class="text-base font-bold text-white mb-0.5">2026 CE</div>
+                    <div id="display-month" class="text-[10px] text-blue-300">April</div>
+                </div>
+            </div>
+        </div>
+
+        <div id="bottom-controls" class="flex flex-col md:flex-row gap-2 mt-auto pointer-events-auto max-w-5xl mx-auto w-full pb-1 transition-all duration-500 transform">
+            <div class="bg-black/80 border border-white/10 p-2 rounded-lg flex-1 shadow-2xl">
+                <h3 class="text-[9px] font-semibold text-gray-300 uppercase tracking-wider mb-1.5 border-b border-white/10 pb-1">Milankovitch Orbital Mechanics</h3>
+                <div class="space-y-1">
+                    <div class="flex justify-between items-center"><span class="text-[9px] text-gray-400">Axial Tilt (Obliquity)</span><span id="data-tilt" class="text-[9px] font-mono text-amber-300">23.44°</span></div>
+                    <div class="w-full bg-white/10 rounded-full h-[3px]"><div id="bar-tilt" class="bg-amber-400 h-[3px] rounded-full" style="width: 50%;"></div></div>
+                    <div class="flex justify-between items-center mt-1"><span class="text-[9px] text-gray-400">Live N-Body Eccentricity</span><span id="data-ecc" class="text-[9px] font-mono text-purple-300">0.016</span></div>
+                    <div class="w-full bg-white/10 rounded-full h-[3px]"><div id="bar-ecc" class="bg-purple-400 h-[3px] rounded-full transition-none" style="width: 20%;"></div></div>
+                    <div class="flex justify-between items-center mt-1"><span class="text-[9px] text-gray-400">Precession Cycle</span><span id="data-prec" class="text-[9px] font-mono text-blue-300">0.0%</span></div>
+                    <div class="w-full bg-white/10 rounded-full h-[3px]"><div id="bar-prec" class="bg-blue-400 h-[3px] rounded-full" style="width: 0%;"></div></div>
+                </div>
+            </div>
+
+            <div class="bg-black/80 border border-white/10 p-2 rounded-lg flex-1 shadow-2xl flex flex-col justify-center">
+                <h3 class="text-[9px] font-semibold text-gray-300 uppercase tracking-wider mb-1.5 border-b border-white/10 pb-1">Global Estimations</h3>
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <div class="text-[9px] text-gray-400">Temp Anomaly</div>
+                        <div id="data-temp" class="text-sm font-mono text-red-400 mt-0">0.0 °C</div>
+                    </div>
+                    <div>
+                        <div class="text-[9px] text-gray-400">Sea Level Delta</div>
+                        <div id="data-sea" class="text-sm font-mono text-blue-400 mt-0">0.0 m</div>
+                    </div>
+                    <div class="col-span-2">
+                        <div class="text-[9px] text-gray-400">Ice Coverage Est.</div>
+                        <div class="w-full bg-white/10 rounded-full h-1 mt-1">
+                            <div id="data-ice-bar" class="bg-blue-300 h-1 rounded-full transition-all duration-300" style="width: 10%;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-black/80 border border-white/10 p-2 rounded-lg flex-[2] shadow-2xl">
+                <h3 class="text-[9px] font-semibold text-gray-300 uppercase tracking-wider mb-1.5 border-b border-white/10 pb-1">Temporal Controls</h3>
+                <div class="space-y-2">
+                    <div>
+                        <div class="flex justify-between text-[9px] text-gray-400 mb-1"><span>-6M Yrs (Miocene)</span><span class="font-bold text-white">Year</span><span>Present Day</span></div>
+                        <input type="range" id="slider-year" min="0" max="1000" value="1000" step="1">
+                        <div class="flex flex-wrap mt-1 gap-1">
+                            <button class="preset-btn flex-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded py-0.5 text-[8px] transition" data-year="-5330000">Zanclean Flood</button>
+                            <button class="preset-btn flex-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded py-0.5 text-[8px] transition" data-year="-3000000">Isthmus of Panama</button>
+                            <button class="preset-btn flex-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded py-0.5 text-[8px] transition" data-year="-74000">Toba Eruption</button>
+                            <button class="preset-btn flex-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded py-0.5 text-[8px] transition" data-year="-12000">Younger Dryas</button>
+                            <button class="preset-btn flex-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded py-0.5 text-[8px] transition" data-year="2026">Present Day</button>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="flex justify-between text-[9px] text-gray-400 mb-1"><span>January</span><span class="font-bold text-white">Month (Seasonal Shift)</span><span>December</span></div>
+                        <input type="range" id="slider-month" min="1" max="12" value="4" step="1">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+        const TEXTURES = {
+            color: 'https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg',
+            bump: 'https://unpkg.com/three-globe/example/img/earth-topology.png',
+            water: 'https://unpkg.com/three-globe/example/img/earth-water.png',
+            clouds: 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_clouds_1024.png'
+        };
+
+        const POIS = [
+            { id: 'poi-beringia', title: 'Beringia Land Bridge', desc: 'Migration route to the Americas.', lat: 65.0, lng: -168.0, minYear: -30000, maxYear: -11000 },
+            { id: 'poi-doggerland', title: 'Doggerland', desc: 'Connected UK to Mainland Europe.', lat: 54.0, lng: 3.0, minYear: -100000, maxYear: -6500 },
+            { id: 'poi-storegga', title: 'Storegga Slide', desc: 'Mega-tsunami wipes out remaining Doggerland.', lat: 64.0, lng: 5.0, minYear: -6500, maxYear: -6000 },
+            { id: 'poi-sahul', title: 'Sahul Continent', desc: 'Australia & New Guinea connected.', lat: -10.0, lng: 135.0, minYear: -100000, maxYear: -8000 },
+            { id: 'poi-sundaland', title: 'Sundaland', desc: 'Lush Ice Age subcontinent twice the size of India.', lat: 0.0, lng: 110.0, minYear: -50000, maxYear: -10000 },
+            { id: 'poi-green-sahara', title: 'Green Sahara', desc: 'Lush savanna during the Holocene Optimum.', lat: 20.0, lng: 10.0, minYear: -9000, maxYear: -3000 },
+            { id: 'poi-megachad', title: 'Lake Mega-Chad', desc: 'Massive inland freshwater lake.', lat: 15.0, lng: 16.0, minYear: -9000, maxYear: -4000 },
+            { id: 'poi-agassiz', title: 'Glacial Lake Agassiz', desc: 'Massive freshwater melt lake in North America.', lat: 52.0, lng: -95.0, minYear: -13000, maxYear: -8500 },
+            { id: 'poi-lahontan', title: 'Lakes Lahontan & Bonneville', desc: 'Giant inland lakes covering Nevada/Utah.', lat: 40.0, lng: -115.0, minYear: -25000, maxYear: -10000 },
+            { id: 'poi-toba', title: 'Toba Supereruption', desc: 'Volcanic winter causes genetic bottleneck.', lat: 2.6, lng: 98.8, minYear: -80000, maxYear: -70000 },
+            { id: 'poi-panama', title: 'Isthmus of Panama Formed', desc: 'Closes Atlantic-Pacific currents, triggering Ice Ages.', lat: 9.0, lng: -80.0, minYear: -6000000, maxYear: -3000000 },
+            { id: 'poi-messinian', title: 'Messinian Salinity Crisis', desc: 'Mediterranean evaporated into salt flats.', lat: 35.0, lng: 15.0, minYear: -6000000, maxYear: -5330000 },
+            { id: 'poi-tamanrasset', title: 'Tamanrasset River System', desc: 'Massive river flowing through a lush Sahara.', lat: 20.0, lng: -10.0, minYear: -9000, maxYear: -3000 },
+            { id: 'poi-sarasvati', title: 'Sarasvati River', desc: 'Ancient Vedic river that dried up as the climate shifted.', lat: 28.0, lng: 72.0, minYear: -100000, maxYear: -4000 }
+        ];
+
+        const ROUTES = [
+            { name: 'Migration to Americas', color: 0xef4444, path: [[65, -165], [60, -135], [50, -115], [35, -105], [15, -95], [-10, -75], [-30, -65]] },
+            { name: 'European Expansion', color: 0x3b82f6, path: [[10, 38], [25, 35], [35, 38], [42, 25], [48, 15], [45, 0]] },
+            { name: 'Out of Africa (Coastal)', color: 0x22c55e, path: [[-5, 35], [12, 43], [15, 52], [24, 64], [20, 75], [15, 82], [22, 90], [15, 96], [0, 105], [-10, 135]] }
+        ];
+
+        const CLIMATE_DATA = [
+            { y: 2026, t: 0.0, s: 0.0 }, { y: 1900, t: -1.0, s: -0.2 }, { y: 0, t: -1.2, s: -0.5 }, { y: -6000, t: 0.5, s: -2.0 },
+            { y: -10000, t: -1.0, s: -35.0 }, { y: -11500, t: -1.5, s: -50.0 }, { y: -12000, t: -4.5, s: -65.0 },
+            { y: -14000, t: -2.0, s: -85.0 }, { y: -20000, t: -6.5, s: -120.0 }, { y: -30000, t: -5.0, s: -100.0 },
+            { y: -60000, t: -4.5, s: -80.0 }, { y: -74000, t: -7.5, s: -75.0 }, { y: -80000, t: -5.0, s: -60.0 }, 
+            { y: -100000, t: -2.0, s: -30.0 }, { y: -3000000, t: +2.5, s: 0.0 }, { y: -6000000, t: +3.0, s: 0.0 }
+        ];
+
+        const TIME_SCALE = [
+            { v: 0, y: -6000000 }, { v: 150, y: -100000 }, { v: 400, y: -20000 }, { v: 700, y: -10000 }, { v: 1000, y: 2026 }
+        ];
+
+        function sliderToYear(val) {
+            for(let i=0; i<TIME_SCALE.length-1; i++) {
+                if (val >= TIME_SCALE[i].v && val <= TIME_SCALE[i+1].v) {
+                    const t = (val - TIME_SCALE[i].v) / (TIME_SCALE[i+1].v - TIME_SCALE[i].v);
+                    return TIME_SCALE[i].y + t * (TIME_SCALE[i+1].y - TIME_SCALE[i].y);
+                }
+            }
+            return 2026;
+        }
+        function yearToSlider(year) {
+            for(let i=0; i<TIME_SCALE.length-1; i++) {
+                if (year >= TIME_SCALE[i].y && year <= TIME_SCALE[i+1].y) {
+                    const t = (year - TIME_SCALE[i].y) / (TIME_SCALE[i+1].y - TIME_SCALE[i].y);
+                    return TIME_SCALE[i].v + t * (TIME_SCALE[i+1].v - TIME_SCALE[i].v);
+                }
+            }
+            return 1000;
+        }
+        function getClimate(year) {
+            if (year >= CLIMATE_DATA[0].y) return CLIMATE_DATA[0];
+            if (year <= CLIMATE_DATA[CLIMATE_DATA.length - 1].y) return CLIMATE_DATA[CLIMATE_DATA.length - 1];
+            for (let i = 0; i < CLIMATE_DATA.length - 1; i++) {
+                const d1 = CLIMATE_DATA[i], d2 = CLIMATE_DATA[i + 1];
+                if (year <= d1.y && year > d2.y) {
+                    const progress = (year - d2.y) / (d1.y - d2.y);
+                    const t = (1 - Math.cos(progress * Math.PI)) / 2;
+                    return { t: d2.t + (d1.t - d2.t) * t, s: d2.s + (d1.s - d2.s) * t };
+                }
+            }
+            return CLIMATE_DATA[0];
+        }
+
+        // --- N-BODY GRAVITATIONAL INTEGRATOR ---
+        // Simulates real-time Newtonian physics to calculate Earth's true orbital eccentricity instead of using sine waves.
+        class NBodyPhysics {
+            constructor() {
+                this.G = 0.0001; // Scaled gravitational constant
+                // Initial states (mass, x, y, vx, vy)
+                this.bodies = {
+                    sun: { m: 10000, p: new THREE.Vector2(0, 0), v: new THREE.Vector2(0, 0) },
+                    earth: { m: 1, p: new THREE.Vector2(100, 0), v: new THREE.Vector2(0, 1.0) }, // Base circular velocity
+                    jupiter: { m: 317, p: new THREE.Vector2(520, 0), v: new THREE.Vector2(0, 0.43) } // Perturber
+                };
+                this.dt = 0.5; // Timestep
+                this.earthMinR = 100;
+                this.earthMaxR = 100;
+                this.history = [];
+            }
+            
+            step() {
+                // Symplectic Euler Integration
+                const earth = this.bodies.earth;
+                const sun = this.bodies.sun;
+                const jupiter = this.bodies.jupiter;
+
+                // Force from Sun
+                let rSun = new THREE.Vector2().subVectors(sun.p, earth.p);
+                let distSunSq = rSun.lengthSq();
+                let fSun = rSun.normalize().multiplyScalar((this.G * sun.m * earth.m) / distSunSq);
+
+                // Force from Jupiter (The Milankovitch driver)
+                let rJup = new THREE.Vector2().subVectors(jupiter.p, earth.p);
+                let distJupSq = rJup.lengthSq();
+                let fJup = rJup.normalize().multiplyScalar((this.G * jupiter.m * earth.m) / distJupSq);
+
+                // Update Earth Velocity
+                let totalForce = new THREE.Vector2().addVectors(fSun, fJup);
+                earth.v.add(totalForce.multiplyScalar(this.dt / earth.m));
+                
+                // Update Earth Position
+                earth.p.add(earth.v.clone().multiplyScalar(this.dt));
+
+                // Update Jupiter (Simplified, only affected by Sun for stability)
+                let rSJ = new THREE.Vector2().subVectors(sun.p, jupiter.p);
+                let fSJ = rSJ.normalize().multiplyScalar((this.G * sun.m * jupiter.m) / rSJ.lengthSq());
+                jupiter.v.add(fSJ.multiplyScalar(this.dt / jupiter.m));
+                jupiter.p.add(jupiter.v.clone().multiplyScalar(this.dt));
+
+                // Calculate Live Eccentricity
+                let currentR = earth.p.length();
+                this.earthMinR = Math.min(this.earthMinR, currentR);
+                this.earthMaxR = Math.max(this.earthMaxR, currentR);
+                
+                // Reset min/max every full orbit (roughly length > 600 history ticks)
+                this.history.push(currentR);
+                if (this.history.length > 600) {
+                    this.history.shift();
+                    this.earthMinR = Math.min(...this.history);
+                    this.earthMaxR = Math.max(...this.history);
+                }
+            }
+
+            getEccentricity() {
+                // e = (Ra - Rp) / (Ra + Rp)
+                const e = (this.earthMaxR - this.earthMinR) / (this.earthMaxR + this.earthMinR);
+                return isNaN(e) ? 0.016 : e; // Default to present day if math hasn't settled
+            }
+        }
+        const physicsEngine = new NBodyPhysics();
+
+        const CONSTELLATIONS = {
+            "Orion": [[5.9, 7.4], [5.4, 6.3], [5.2, -8.2], [5.9, 7.4], [5.9, -9.6], [5.5, -1.2], [5.6, -1.3], [5.7, -1.9], [5.5, -1.2], [5.2, -8.2]],
+            "Ursa Major": [[11.0, 61.8], [11.1, 56.4], [11.9, 53.7], [12.2, 57.0], [11.0, 61.8], [12.2, 57.0], [12.9, 56.0], [13.4, 54.9], [13.8, 49.3]],
+            "Cassiopeia": [[0.1, 59.1], [0.6, 56.5], [0.9, 60.7], [1.4, 60.2], [1.9, 63.6]],
+            "Crux": [[12.4, -63.1], [12.8, -59.7], [12.4, -63.1], [12.8, -65.1], [12.2, -58.7], [13.2, -60.4]]
+        };
+
+        function raDecToVector3(ra, dec, radius) {
+            const raRad = (ra / 24) * Math.PI * 2, decRad = (dec / 360) * Math.PI * 2;
+            return new THREE.Vector3(radius * Math.cos(decRad) * Math.cos(raRad), radius * Math.sin(decRad), radius * Math.cos(decRad) * Math.sin(raRad));
+        }
+
+        function latLngToVector3(lat, lng, radius) {
+            const phi = (90 - lat) * (Math.PI / 180), theta = (lng + 180) * (Math.PI / 180);
+            return new THREE.Vector3(-(radius * Math.sin(phi) * Math.cos(theta)), radius * Math.cos(phi), radius * Math.sin(phi) * Math.sin(theta));
+        }
+
+        function createTextLabel(text, color) {
+            const canvas = document.createElement('canvas'); const ctx = canvas.getContext('2d');
+            canvas.width = 256; canvas.height = 64; ctx.font = "bold 28px 'Segoe UI'"; ctx.fillStyle = color; ctx.textAlign = "center";
+            ctx.fillText(text, 128, 40); const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true, depthWrite: false }));
+            sprite.scale.set(3, 0.75, 1); return sprite;
+        }
+
+        const container = document.getElementById('canvas-container'), poiContainer = document.getElementById('poi-container');
+        const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 0, 3.5);
+        
+        // BUG FIX: Set alpha to false to prevent WebKit backdrop-filter glitches bleeding onto the canvas
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+        renderer.setSize(window.innerWidth, window.innerHeight); renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        container.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true; controls.dampingFactor = 0.05; controls.minDistance = 1.05; controls.maxDistance = 10; controls.enablePan = false;
+
+        const textureLoader = new THREE.TextureLoader(); textureLoader.crossOrigin = "Anonymous";
+        let loadedCount = 0; const totalTextures = Object.keys(TEXTURES).length; const textureMaps = {};
+        function checkLoad() {
+            loadedCount++; document.getElementById('loading-text').innerText = `Syncing planetary data... ${Math.round((loadedCount/totalTextures)*100)}%`;
+            if (loadedCount === totalTextures) { initEarth(); setTimeout(() => { document.getElementById('loading').style.opacity = '0'; setTimeout(() => document.getElementById('loading').style.display = 'none', 1000); }, 500); }
+        }
+        for (let key in TEXTURES) textureMaps[key] = textureLoader.load(TEXTURES[key], checkLoad, undefined, () => checkLoad());
+
+        let earthMaterial, earthGlobe, cloudGlobe, earthMap, cloudMap, celestialSphere, sunMesh, sunLightPivot;
+        let migrationGlobe, migrationMap;
+        let atmosphereMaterial, atmosphereGlobe;
+        let astroLabels = [], planetaryMeshes = [], poiElements = [];
+        let isSpinning = true, is2DView = false, isDataView = false, isAstroVisible = true, isCloudsVisible = true, isUIVisible = true, isMigrationVisible = false;
+
+        const earthVertexShader = `
+            varying vec2 vUv; varying vec3 vNormal; varying vec3 vPosition;
+            void main() {
+                vUv = uv;
+                vNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+                vPosition = (modelMatrix * vec4(position, 1.0)).xyz;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `;
+
+        const earthFragmentShader = `
+            uniform sampler2D tColor; uniform sampler2D tBump; uniform sampler2D tWater;
+            uniform float uYear; uniform float uMonth; uniform float uTempDelta; uniform float uSeaLevelDrop;
+            uniform vec3 uSunPosition; uniform float uIs2D; uniform float uViewMode; uniform float uHoloceneOptimum;
+            uniform float uTobaAsh; uniform float uTime;
+            varying vec2 vUv; varying vec3 vNormal; varying vec3 vPosition;
+
+            vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+            vec2 mod289(vec2 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+            vec3 permute(vec3 x) { return mod289(((x*34.0)+1.0)*x); }
+            float snoise(vec2 v) {
+                const vec4 C = vec4(0.211324865405187, 0.366025403784439, -0.577350269189626, 0.024390243902439);
+                vec2 i = floor(v + dot(v, C.yy)); vec2 x0 = v - i + dot(i, C.xx); vec2 i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+                vec4 x12 = x0.xyxy + C.xxzz; x12.xy -= i1; i = mod289(i);
+                vec3 p = permute(permute(i.y + vec3(0.0, i1.y, 1.0)) + i.x + vec3(0.0, i1.x, 1.0));
+                vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy), dot(x12.zw,x12.zw)), 0.0);
+                m = m*m*m*m; vec3 x = 2.0 * fract(p * C.www) - 1.0; vec3 h = abs(x) - 0.5;
+                vec3 ox = floor(x + 0.5); vec3 a0 = x - ox; m *= 1.79284291400159 - 0.85373472095314 * (a0*a0 + h*h);
+                vec3 g; g.x = a0.x * x0.x + h.x * x0.y; g.yz = a0.yz * x12.xz + h.yz * x12.yw; return 130.0 * dot(m, g);
+            }
+            
+            // Curl Noise for Fluid Dynamics
+            vec2 curlNoise(vec2 uv) {
+                float e = 0.01;
+                float dx = (snoise(uv + vec2(e, 0.0)) - snoise(uv - vec2(e, 0.0))) / (2.0 * e);
+                float dy = (snoise(uv + vec2(0.0, e)) - snoise(uv - vec2(0.0, e))) / (2.0 * e);
+                return vec2(dy, -dx);
+            }
+
+            void main() {
+                // --- TECTONIC PLATE MOVEMENT (CONTINENTAL DRIFT) ---
+                // Calculate drift factor based on deep time (-6M Years max)
+                float driftFactor = clamp(-uYear / 6000000.0, 0.0, 1.0) * 0.018; 
+                vec2 shiftedUv = vUv;
+                
+                // Compress the Atlantic (Pull Americas East, pull Africa West)
+                shiftedUv.x -= (1.0 - smoothstep(0.2, 0.4, vUv.x)) * driftFactor; 
+                shiftedUv.x += smoothstep(0.4, 0.6, vUv.x) * driftFactor;         
+                
+                // Move the Indian Plate Southwards
+                float indiaMask = smoothstep(0.68, 0.73, vUv.x) * (1.0 - smoothstep(0.75, 0.78, vUv.x)) * smoothstep(0.5, 0.6, vUv.y) * (1.0 - smoothstep(0.7, 0.75, vUv.y));
+                shiftedUv.y += indiaMask * driftFactor * 1.5; 
+
+                vec4 baseColor = texture2D(tColor, shiftedUv); float elevation = texture2D(tBump, shiftedUv).r; float waterMask = texture2D(tWater, shiftedUv).r;
+                if (elevation > 0.02) waterMask = 0.0;
+                float normalizedDepth = 1.0 - smoothstep(0.05, 0.35, baseColor.g);
+                float depthMeters = pow(clamp(normalizedDepth + snoise(shiftedUv * 400.0) * 0.01, 0.0, 1.0), 2.0) * 6000.0;
+                
+                // Tectonic Overrides
+                float panamaMask = (smoothstep(0.26, 0.27, shiftedUv.x) - smoothstep(0.29, 0.30, shiftedUv.x)) * (smoothstep(0.53, 0.54, shiftedUv.y) - smoothstep(0.57, 0.58, shiftedUv.y));
+                if (uYear <= -3000000.0 && panamaMask > 0.5 && elevation < 0.1) { waterMask = 1.0; depthMeters = 500.0; } // Sink Panama
+
+                // --- FLUID DYNAMICS (OCEAN CURRENTS) ---
+                vec3 finalColor = baseColor.rgb;
+                vec3 dynamicNormal = vNormal;
+                if (waterMask > 0.5 && uIs2D < 0.5) {
+                    vec2 currentFlow = curlNoise(shiftedUv * 20.0 + uTime * 0.05);
+                    
+                    // BUG FIX: Normalize the extreme math derivatives to prevent HDR color clipping (neon pinks/purples)
+                    vec2 safeFlow = clamp(currentFlow * 0.01, -1.0, 1.0);
+                    
+                    dynamicNormal = normalize(vNormal + vec3(safeFlow.x, safeFlow.y, 0.0) * 0.5);
+                    // Add subtle color shifting to represent temperature/algae flow (Safely clamped)
+                    finalColor += vec3(0.0, max(0.0, safeFlow.x), max(0.0, safeFlow.y)) * 0.1;
+                }
+
+                bool isNewlyExposedLand = (waterMask > 0.5 && depthMeters < uSeaLevelDrop);
+                
+                float lat = abs(shiftedUv.y - 0.5) * 2.0; float seasonShift = sin((uMonth / 12.0) * 3.14159 * 2.0) * 0.06;
+                float localSeasonalIce = (shiftedUv.y - 0.5 > 0.0) ? -seasonShift : seasonShift;
+                
+                float localTempDelta = uTempDelta - (pow(elevation, 2.5) * 12.0); 
+                float iceExpansion = (-localTempDelta / 6.5) * 0.38;
+                float iceThreshold = 0.88 - iceExpansion + localSeasonalIce;
+                bool isIce = lat + snoise(shiftedUv * 50.0) * 0.05 > iceThreshold;
+
+                // Inland Lakes
+                float isMegaChad = 0.0; float isAgassiz = 0.0; float isLahontan = 0.0;
+                if (uHoloceneOptimum > 0.0) {
+                    float chadDist = length(vec2((shiftedUv.x - 0.544) * 2.0, shiftedUv.y - 0.583)) + snoise(shiftedUv * 400.0) * 0.004;
+                    isMegaChad = (1.0 - smoothstep(0.005, 0.015, chadDist)) * uHoloceneOptimum;
+                }
+                if (uYear < -8500.0 && uYear > -13000.0) {
+                    float agDist = length(vec2((shiftedUv.x - 0.236) * 2.0, shiftedUv.y - 0.788)) + snoise(shiftedUv * 400.0) * 0.005;
+                    isAgassiz = 1.0 - smoothstep(0.015, 0.025, agDist);
+                }
+                if (uYear < -10000.0 && uYear > -25000.0) {
+                    float lhDist = length(vec2((shiftedUv.x - 0.180) * 2.0, shiftedUv.y - 0.722)) + snoise(shiftedUv * 600.0) * 0.003;
+                    isLahontan = 1.0 - smoothstep(0.005, 0.01, lhDist);
+                }
+
+                // --- HISTORIC RIVER SYSTEMS ---
+                float isRiver = 0.0;
+                if (uHoloceneOptimum > 0.0) { 
+                    vec2 p1 = vec2(0.513, 0.627); vec2 p2 = vec2(0.455, 0.611);
+                    vec2 meander = vec2(snoise(shiftedUv * 80.0), snoise(shiftedUv * 80.0 + 42.0)) * 0.0015;
+                    vec2 nuv = shiftedUv + meander;
+                    vec2 pa = nuv - p1; vec2 ba = p2 - p1;
+                    float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+                    float rWidth = 0.0003 + 0.0009 * sin(h * 3.1415); 
+                    float riverMask = 1.0 - smoothstep(rWidth * 0.2, rWidth, length(pa - ba * h));
+                    float maxElev = mix(0.15, 0.03, h);
+                    riverMask *= (1.0 - smoothstep(maxElev - 0.02, maxElev + 0.02, elevation));
+                    isRiver = max(isRiver, riverMask * uHoloceneOptimum);
+                }
+                
+                float sarasvatiActive = smoothstep(-2000.0, -4000.0, uYear) * (1.0 - smoothstep(-100000.0, -110000.0, uYear)); 
+                if (sarasvatiActive > 0.0) { 
+                    vec2 p1 = vec2(0.709, 0.676); vec2 p2 = vec2(0.686, 0.630);
+                    vec2 meander = vec2(snoise(shiftedUv * 100.0), snoise(shiftedUv * 100.0 + 84.0)) * 0.0015;
+                    vec2 nuv = shiftedUv + meander;
+                    vec2 pa = nuv - p1; vec2 ba = p2 - p1;
+                    float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+                    float rWidth = 0.0004 + 0.0012 * h;
+                    float riverMask = 1.0 - smoothstep(rWidth * 0.2, rWidth, length(pa - ba * h));
+                    float maxElev = mix(0.3, 0.04, h);
+                    riverMask *= (1.0 - smoothstep(maxElev - 0.02, maxElev + 0.02, elevation));
+                    isRiver = max(isRiver, clamp(riverMask * sarasvatiActive, 0.0, 1.0));
+                }
+
+                // Messinian Salinity Crisis
+                bool isMessinian = (uYear <= -5330000.0 && waterMask > 0.5 && 
+                    (smoothstep(0.485, 0.487, shiftedUv.x) - smoothstep(0.60, 0.61, shiftedUv.x)) * (smoothstep(0.66, 0.67, shiftedUv.y) - smoothstep(0.76, 0.77, shiftedUv.y)) * (1.0 - (smoothstep(0.57, 0.58, shiftedUv.x) * smoothstep(0.73, 0.74, shiftedUv.y))) > 0.5);
+
+                float specularity = 0.0;
+                
+                // Biome Preservations
+                float inSahara = (smoothstep(0.46, 0.48, shiftedUv.x) - smoothstep(0.56, 0.58, shiftedUv.x)) * (smoothstep(0.53, 0.56, shiftedUv.y) - smoothstep(0.66, 0.69, shiftedUv.y));
+                float inSundaland = (smoothstep(0.72, 0.74, shiftedUv.x) - smoothstep(0.85, 0.87, shiftedUv.x)) * (smoothstep(0.42, 0.44, shiftedUv.y) - smoothstep(0.56, 0.58, shiftedUv.y));
+                
+                if (inSahara > 0.0 && uHoloceneOptimum > 0.0 && waterMask < 0.5 && isMegaChad < 0.5 && isRiver < 0.5) {
+                    finalColor = mix(finalColor, mix(finalColor, vec3(0.25, 0.38, 0.15), snoise(shiftedUv * 200.0) * 0.5 + 0.5), inSahara * uHoloceneOptimum * 0.8);
+                }
+
+                if (isIce) { 
+                    // UPGRADE: Added a dense glacial-blue tint to the ice so the climate looks freezing cold
+                    finalColor = mix(finalColor, vec3(0.8, 0.9, 1.0) * (0.85 + snoise(shiftedUv * 100.0) * 0.15), 0.9); 
+                    specularity = 0.4; 
+                }
+                else if (isMessinian) { finalColor = mix(baseColor.rgb, vec3(0.9, 0.85, 0.8) + snoise(shiftedUv * 500.0) * 0.1, 0.95); specularity = 0.05; isNewlyExposedLand = true; }
+                else if (isMegaChad > 0.5 || isAgassiz > 0.5 || isLahontan > 0.5 || isRiver > 0.5) { finalColor = mix(baseColor.rgb, vec3(0.05, 0.35, 0.45), 0.95); specularity = 0.6; } 
+                else if (isNewlyExposedLand) { finalColor = mix(baseColor.rgb, vec3(0.5, 0.45, 0.3), 0.9); specularity = 0.02; }
+                else if (waterMask > 0.5) specularity = 0.8;
+                else {
+                    float dryFactor = clamp(-uTempDelta / 6.5, 0.0, 1.0) * (1.0 - inSahara * uHoloceneOptimum) * (1.0 - inSundaland);
+                    finalColor = mix(finalColor, vec3(0.6, 0.5, 0.3), dryFactor * 0.4);
+                }
+
+                vec3 lightDir = normalize(uSunPosition - vPosition); float diff = (uIs2D > 0.5) ? 1.0 : max(dot(dynamicNormal, lightDir), 0.0);
+                vec3 litColor = finalColor * (0.1 + diff * 0.9);
+                if (uIs2D < 0.5) {
+                    vec3 reflectDir = reflect(-lightDir, dynamicNormal); float spec = pow(max(dot(normalize(cameraPosition - vPosition), reflectDir), 0.0), 32.0);
+                    litColor += vec3(1.0, 0.9, 0.8) * spec * specularity * diff;
+                    
+                    // RESTORED: Atmospheric surface scattering (The "Bluey" glow and sunsets)
+                    float dayNight = dot(dynamicNormal, lightDir);
+                    vec3 rimColor = mix(vec3(1.0, 0.4, 0.1), vec3(0.2, 0.5, 1.0), smoothstep(0.0, 0.3, dayNight)); 
+                    float dustFactor = clamp(-uTempDelta / 6.5, 0.0, 1.0);
+                    rimColor = mix(rimColor, vec3(0.6, 0.7, 0.8), dustFactor * 0.4); // Colder, frostier haze during Ice Age
+                    rimColor = mix(rimColor, vec3(0.5, 0.2, 0.1), uTobaAsh);         
+                    
+                    litColor += rimColor * smoothstep(0.6, 1.0, 1.0 - max(dot(normalize(cameraPosition - vPosition), dynamicNormal), 0.0)) * 0.5 * max(dayNight + 0.1, 0.0);
+                }
+                if (uViewMode > 0.5) litColor = (waterMask > 0.5) ? ((depthMeters < 120.0) ? mix(vec3(0,1,1), vec3(0,0.3,0.8), depthMeters/120.0) : mix(vec3(0,0.2,0.6), vec3(0), (depthMeters-120.0)/5880.0)) : vec3(0.05 + elevation*0.25);
+                gl_FragColor = vec4(litColor, 1.0);
+            }
+        `;
+
+        // --- VOLUMETRIC RAYMARCHING ATMOSPHERE SHADER ---
+        // Calculates true optical depth and Rayleigh scattering through the atmospheric volume
+        const atmosVertexShader = `
+            varying vec3 vNormal; varying vec3 vPosition;
+            void main() {
+                vNormal = normalize(normalMatrix * normal);
+                vPosition = (modelMatrix * vec4(position, 1.0)).xyz;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `;
+
+        const atmosFragmentShader = `
+            uniform vec3 uSunPosition; uniform float uTempDelta; uniform float uTobaAsh; uniform vec3 cameraPos;
+            varying vec3 vNormal; varying vec3 vPosition;
+
+            // Simplified Optical Depth Integration
+            float rayleighDensity(float h) { return exp(-h / 0.08); } // Scale height
+            
+            void main() {
+                vec3 viewDir = normalize(cameraPosition - vPosition);
+                vec3 lightDir = normalize(uSunPosition - vPosition);
+                
+                // Fresnel intersection path length
+                float fresnel = clamp(1.0 - dot(viewDir, vNormal), 0.0, 1.0);
+                
+                // Integrate density along the view ray (Approximated for performance)
+                float opticalDepth = 0.0;
+                float stepSize = 0.05;
+                for(int i=0; i<8; i++) {
+                    float h = float(i) * stepSize * fresnel;
+                    opticalDepth += rayleighDensity(h) * stepSize;
+                }
+
+                // Rayleigh Scattering Physics (Blue light scatters more)
+                vec3 scatterCoeff = vec3(0.1, 0.3, 0.7); 
+                vec3 rayleighColor = scatterCoeff * opticalDepth;
+
+                // Sunset coloring (Mie scattering approximation)
+                float dayNight = dot(vNormal, lightDir);
+                float sunsetGlow = smoothstep(-0.15, 0.15, dayNight) - smoothstep(0.1, 0.4, dayNight);
+                vec3 sunsetColor = vec3(1.0, 0.4, 0.1) * sunsetGlow * opticalDepth * 2.0;
+
+                // Historical Adjustments
+                float dustFactor = clamp(-uTempDelta / 6.5, 0.0, 1.0);
+                rayleighColor = mix(rayleighColor, vec3(0.5, 0.5, 0.5) * opticalDepth, dustFactor * 0.5); // Ice Age Dust
+                
+                if (uTobaAsh > 0.0) { 
+                    rayleighColor = mix(rayleighColor, vec3(0.4, 0.1, 0.05) * opticalDepth * 2.0, uTobaAsh); 
+                }
+
+                vec3 finalColor = rayleighColor + sunsetColor;
+                float intensity = clamp(opticalDepth * 2.0 * smoothstep(-0.2, 0.5, dayNight), 0.0, 1.0);
+                
+                gl_FragColor = vec4(finalColor, intensity);
+            }
+        `;
+
+        function initEarth() {
+            earthMaterial = new THREE.ShaderMaterial({ vertexShader: earthVertexShader, fragmentShader: earthFragmentShader, uniforms: { tColor: { value: textureMaps.color }, tBump: { value: textureMaps.bump }, tWater: { value: textureMaps.water }, uYear: { value: 2026.0 }, uMonth: { value: 4.0 }, uTempDelta: { value: 0.0 }, uSeaLevelDrop: { value: 0.0 }, uSunPosition: { value: new THREE.Vector3() }, uIs2D: { value: 0.0 }, uViewMode: { value: 0.0 }, uHoloceneOptimum: { value: 0.0 }, uTobaAsh: { value: 0.0 }, uTime: { value: 0.0 } } });
+            
+            earthGlobe = new THREE.Mesh(new THREE.SphereGeometry(1, 256, 256), earthMaterial); scene.add(earthGlobe);
+            earthMap = new THREE.Mesh(new THREE.PlaneGeometry(4, 2, 256, 256), earthMaterial); earthMap.visible = false; scene.add(earthMap);
+            
+            atmosphereMaterial = new THREE.ShaderMaterial({ vertexShader: atmosVertexShader, fragmentShader: atmosFragmentShader, uniforms: { uSunPosition: { value: new THREE.Vector3() }, uTempDelta: { value: 0.0 }, uTobaAsh: { value: 0.0 }, cameraPos: { value: camera.position } }, transparent: true, blending: THREE.AdditiveBlending, side: THREE.BackSide, depthWrite: false });
+            atmosphereGlobe = new THREE.Mesh(new THREE.SphereGeometry(1.04, 64, 64), atmosphereMaterial); scene.add(atmosphereGlobe);
+
+            POIS.forEach(p => { const el = document.createElement('div'); el.className = 'poi-marker'; el.innerHTML = `<div class="poi-dot"></div><div class="poi-label"><strong>${p.title}</strong><br/>${p.desc}</div>`; poiContainer.appendChild(el); poiElements.push({ data: p, element: el, vector: latLngToVector3(p.lat, p.lng, 1.02) }); });
+            
+            migrationGlobe = new THREE.Group(); migrationMap = new THREE.Group(); scene.add(migrationGlobe); scene.add(migrationMap);
+            migrationMap.visible = false; migrationGlobe.visible = false;
+            ROUTES.forEach(r => {
+                let pGlobe = [], pMap = [];
+                r.path.forEach(c => { pGlobe.push(latLngToVector3(c[0], c[1], 1.005)); pMap.push(new THREE.Vector3((c[1]/180)*2.0, (c[0]/90)*1.0, 0.01)); });
+                const curveG = new THREE.CatmullRomCurve3(pGlobe), curveM = new THREE.CatmullRomCurve3(pMap);
+                const mat = new THREE.LineBasicMaterial({ color: r.color, transparent: true, opacity: 0.8, linewidth: 2 });
+                migrationGlobe.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(curveG.getPoints(50)), mat));
+                migrationMap.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(curveM.getPoints(50)), mat));
+            });
+
+            celestialSphere = new THREE.Group(); celestialSphere.rotation.x = 23.5 * (Math.PI / 180); scene.add(celestialSphere);
+            const starsGeo = new THREE.BufferGeometry(); const starsPos = new Float32Array(4000*3); for(let i=0; i<4000*3; i+=3){ const r=100, th=2*Math.PI*Math.random(), ph=Math.acos(2*Math.random()-1); starsPos[i]=r*Math.sin(ph)*Math.cos(th); starsPos[i+1]=r*Math.sin(ph)*Math.sin(th); starsPos[i+2]=r*Math.cos(ph); } starsGeo.setAttribute('position', new THREE.BufferAttribute(starsPos, 3)); celestialSphere.add(new THREE.Points(starsGeo, new THREE.PointsMaterial({ size: 0.1, color: 0xffffff, transparent: true, opacity: 0.8 })));
+            for(let name in CONSTELLATIONS){ const pts = []; CONSTELLATIONS[name].forEach(c => pts.push(raDecToVector3(c[0], c[1], 98))); celestialSphere.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0x4488ff, transparent: true, opacity: 0.5 }))); const lbl = createTextLabel(name, "#88bbff"); lbl.position.copy(raDecToVector3(CONSTELLATIONS[name][0][0], CONSTELLATIONS[name][0][1], 102)); celestialSphere.add(lbl); astroLabels.push(lbl); }
+            sunLightPivot = new THREE.Group(); celestialSphere.add(sunLightPivot); sunMesh = new THREE.Mesh(new THREE.SphereGeometry(2, 16, 16), new THREE.MeshBasicMaterial({ color: 0xffea00 })); sunMesh.position.set(95, 0, 0); sunLightPivot.add(sunMesh); const sl = new THREE.DirectionalLight(0xffffff, 1.2); sl.position.set(50, 0, 0); sunLightPivot.add(sl);
+            [{ n: "Venus", c: 0xffccaa, s: 1.62, d: 90 }, { n: "Mars", c: 0xff4422, s: 0.53, d: 92 }, { n: "Jupiter", c: 0xffaa77, s: 0.08, d: 94 }].forEach(p => { const piv = new THREE.Group(); const m = new THREE.Mesh(new THREE.SphereGeometry(0.5, 16, 16), new THREE.MeshBasicMaterial({ color: p.c })); m.position.set(p.d, 0, 0); piv.add(m); celestialSphere.add(piv); planetaryMeshes.push({ pivot: piv, data: p }); });
+            
+            const cloudMat = new THREE.MeshLambertMaterial({ map: textureMaps.clouds, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, side: THREE.FrontSide, depthWrite: false });
+            cloudGlobe = new THREE.Mesh(new THREE.SphereGeometry(1.015, 64, 64), cloudMat); scene.add(cloudGlobe); cloudMap = new THREE.Mesh(new THREE.PlaneGeometry(4, 2, 64, 64), cloudMat); cloudMap.position.z = 0.05; cloudMap.visible = false; scene.add(cloudMap);
+            
+            let lt = 0; function animate(t) { requestAnimationFrame(animate); const dt = (t - lt) * 0.001; lt = t;
+                
+                // TICK PHYSICS ENGINE
+                physicsEngine.step();
+
+                const d = camera.position.distanceTo(controls.target); let zf = is2DView ? Math.max(0.005, Math.pow(d/2.8, 2)) : Math.max(0.015, Math.pow(Math.max(0.01, d-1.0)/2.5, 1.5));
+                controls.rotateSpeed = controls.panSpeed = zf * 0.6; controls.zoomSpeed = Math.max(0.15, zf*1.5);
+                if (isSpinning && !is2DView) { earthGlobe.rotation.y += 0.05 * dt; cloudGlobe.rotation.y += 0.06 * dt; migrationGlobe.rotation.y += 0.05 * dt; }
+                if (isAstroVisible) astroLabels.forEach(l => l.lookAt(camera.position));
+                if (is2DView) { controls.target.x = Math.max(-2, Math.min(2, controls.target.x)); controls.target.y = Math.max(-1, Math.min(1, controls.target.y)); }
+                
+                const yr = sliderToYear(parseFloat(sliderYear.value));
+                poiElements.forEach(p => {
+                    if (yr <= p.data.maxYear && yr >= p.data.minYear) {
+                        const tv = new THREE.Vector3(); let show = false;
+                        if (is2DView) { tv.set((p.data.lng/180)*2, (p.data.lat/90)*1, 0).applyMatrix4(earthMap.matrixWorld); show = true; }
+                        else { tv.copy(p.vector).applyMatrix4(earthGlobe.matrixWorld); if (new THREE.Vector3().subVectors(camera.position, tv).dot(tv.clone().normalize()) > 0) show = true; }
+                        if (show) { tv.project(camera); if (tv.z < 1.0) { p.element.style.left = `${(tv.x*.5+.5)*window.innerWidth}px`; p.element.style.top = `${(tv.y*-.5+.5)*window.innerHeight}px`; p.element.style.display = 'block'; setTimeout(() => p.element.style.opacity = '1', 10); return; } }
+                    } p.element.style.opacity = '0'; setTimeout(() => p.element.style.display='none', 300);
+                });
+
+                if (cloudGlobe || cloudMap) {
+                    const cl = getClimate(yr); const df = Math.max(0, -cl.t / 6.5);
+                    const tobaVolcanicAsh = Math.exp(-Math.pow((yr + 74000) / 2000, 2));
+                    cloudMat.opacity = Math.min(1.0, 0.6 - (df * 0.2) + (tobaVolcanicAsh * 0.3)); 
+                    cloudMat.color.setRGB(1 - tobaVolcanicAsh*0.7, 1 - tobaVolcanicAsh*0.7, 1 - tobaVolcanicAsh*0.7);
+                    
+                    if (earthMaterial) {
+                        earthMaterial.uniforms.uTobaAsh.value = tobaVolcanicAsh;
+                        earthMaterial.uniforms.uTime.value = t * 0.001; // Feed time to fluid dynamics
+                    }
+                    if (atmosphereMaterial) { 
+                        atmosphereMaterial.uniforms.uTobaAsh.value = tobaVolcanicAsh; 
+                        atmosphereMaterial.uniforms.uTempDelta.value = cl.t; 
+                        atmosphereMaterial.uniforms.cameraPos.value.copy(camera.position);
+                    }
+                }
+
+                if (sunMesh && earthMaterial) { 
+                    const wp = new THREE.Vector3(); sunMesh.getWorldPosition(wp); 
+                    earthMaterial.uniforms.uSunPosition.value.copy(wp); 
+                    if (atmosphereMaterial) atmosphereMaterial.uniforms.uSunPosition.value.copy(wp);
+                }
+                renderer.render(scene, camera);
+            } animate(0); 
+            
+            // Poll gravity engine at lower interval to update UI without stuttering
+            setInterval(() => {
+                const liveEcc = physicsEngine.getEccentricity();
+                document.getElementById('data-ecc').innerText = liveEcc.toFixed(4); 
+                document.getElementById('bar-ecc').style.width = ((liveEcc-0.0034)/0.0546)*100+"%";
+            }, 100);
+            
+            updateSimulation();
+        }
+
+        const sliderYear = document.getElementById('slider-year'), sliderMonth = document.getElementById('slider-month'), displayYear = document.getElementById('display-year'), displayMonth = document.getElementById('display-month'), dataTemp = document.getElementById('data-temp'), dataSea = document.getElementById('data-sea'), dataIceBar = document.getElementById('data-ice-bar');
+        const dataTilt = document.getElementById('data-tilt'), barTilt = document.getElementById('bar-tilt');
+        const dataPrec = document.getElementById('data-prec'), barPrec = document.getElementById('bar-prec');
+
+        function updateSimulation() {
+            const yr = sliderToYear(parseFloat(sliderYear.value)), mo = parseFloat(sliderMonth.value), cl = getClimate(yr);
+            displayYear.innerText = yr < 0 ? Math.abs(Math.round(yr)).toLocaleString() + " BCE" : Math.round(yr).toLocaleString() + " CE"; displayMonth.innerText = MONTHS[mo - 1];
+            const h = (yr < -2000 && yr > -10000) ? 1.0 - Math.abs(yr + 6000) / 4000 : 0;
+            const tilt = 23.3 + Math.sin(((yr-2000)/41000)*Math.PI*2)*1.2, pr = Math.abs(yr % 25772) / 25772 * 100;
+            dataTilt.innerText = tilt.toFixed(2)+"°"; barTilt.style.width = ((tilt-22.1)/2.4)*100+"%"; dataPrec.innerText = pr.toFixed(1)+"%"; barPrec.style.width = pr+"%";
+            if (celestialSphere) { celestialSphere.rotation.x = tilt*(Math.PI/180); celestialSphere.rotation.y = (yr-2000)/25772*Math.PI*2; sunLightPivot.rotation.y = ((mo-1)/12)*Math.PI*2; planetaryMeshes.forEach(p => p.pivot.rotation.y = (yr+mo/12)*p.data.speed*Math.PI*2); }
+            if (earthMaterial) { earthMaterial.uniforms.uYear.value = yr; earthMaterial.uniforms.uMonth.value = mo; earthMaterial.uniforms.uTempDelta.value = cl.t; earthMaterial.uniforms.uSeaLevelDrop.value = Math.abs(cl.s); earthMaterial.uniforms.uHoloceneOptimum.value = h; }
+            dataTemp.innerText = (cl.t>0?"+":"")+cl.t.toFixed(1)+" °C"; dataSea.innerText = cl.s.toFixed(1)+" m"; dataIceBar.style.width = Math.min(Math.max(10 + Math.max(0,-cl.t)*2.3 + Math.sin((mo/12)*Math.PI*2)*1.5,0),100)+"%";
+        }
+
+        sliderYear.addEventListener('input', updateSimulation); sliderMonth.addEventListener('input', updateSimulation);
+        document.querySelectorAll('.preset-btn').forEach(b => b.addEventListener('click', e => { sliderYear.value = yearToSlider(parseFloat(e.target.getAttribute('data-year'))); updateSimulation(); }));
+        document.getElementById('toggle-spin').addEventListener('click', e => { isSpinning = !isSpinning; e.target.innerText = isSpinning ? "Pause Spin" : "Resume Spin"; e.target.classList.toggle('bg-red-500/50', !isSpinning); });
+        document.getElementById('toggle-clouds').addEventListener('click', e => { isCloudsVisible = !isCloudsVisible; e.target.innerText = isCloudsVisible ? "Hide Clouds" : "Show Clouds"; cloudGlobe.visible = cloudMap.visible = isCloudsVisible; if(atmosphereGlobe) atmosphereGlobe.visible = isCloudsVisible && !is2DView; e.target.classList.toggle('bg-red-500/50', !isCloudsVisible);});
+        document.getElementById('toggle-astro').addEventListener('click', e => { isAstroVisible = !isAstroVisible; e.target.innerText = isAstroVisible ? "Hide Night Sky" : "Show Night Sky"; celestialSphere.visible = isAstroVisible; e.target.classList.toggle('bg-red-500/50', !isAstroVisible);});
+        document.getElementById('toggle-ui').addEventListener('click', e => { isUIVisible = !isUIVisible; e.target.innerText = isUIVisible ? "Hide Panels" : "Show Panels"; document.getElementById('bottom-controls').classList.toggle('opacity-0', !isUIVisible); document.getElementById('era-box').classList.toggle('opacity-0', !isUIVisible); e.target.classList.toggle('bg-blue-500/50', !isUIVisible);});
+        document.getElementById('toggle-migration').addEventListener('click', e => { isMigrationVisible = !isMigrationVisible; e.target.innerText = isMigrationVisible ? "Hide Migration Routes" : "Show Migration Routes"; migrationGlobe.visible = isMigrationVisible && !is2DView; migrationMap.visible = isMigrationVisible && is2DView; e.target.classList.toggle('bg-red-500/50', isMigrationVisible);});
+        document.getElementById('toggle-view').addEventListener('click', e => { 
+            is2DView = !is2DView; e.target.innerText = is2DView ? "3D Globe View" : "2D Map View"; 
+            earthGlobe.visible = !is2DView; earthMap.visible = is2DView; 
+            cloudGlobe.visible = isCloudsVisible && !is2DView; cloudMap.visible = isCloudsVisible && is2DView;
+            if(atmosphereGlobe) atmosphereGlobe.visible = isCloudsVisible && !is2DView;
+            migrationGlobe.visible = isMigrationVisible && !is2DView; migrationMap.visible = isMigrationVisible && is2DView;
+            if(earthMaterial) earthMaterial.uniforms.uIs2D.value = is2DView ? 1 : 0; 
+            controls.enableRotate = !is2DView; controls.enablePan = is2DView; controls.mouseButtons.LEFT = is2DView ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE; 
+            camera.position.set(0, 0, is2DView ? 2.8 : 3.5); controls.target.set(0,0,0); 
+        });
+        document.getElementById('toggle-data').addEventListener('click', e => { isDataView = !isDataView; e.target.innerText = isDataView ? "Exit Bathymetry" : "Bathymetry"; if (earthMaterial) earthMaterial.uniforms.uViewMode.value = isDataView ? 1 : 0; e.target.classList.toggle('bg-red-500/50', isDataView);});
+        window.addEventListener('resize', () => { camera.aspect = window.innerWidth/window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
+    </script>
+</body>
+</html>
