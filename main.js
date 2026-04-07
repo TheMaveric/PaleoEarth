@@ -78,28 +78,46 @@ physicsEngine = new NBodyPhysics();
 
 function latLngToVec(lat, lng, r) { const phi = (90 - lat) * (Math.PI / 180), theta = (lng + 180) * (Math.PI / 180); return new THREE.Vector3(-(r * Math.sin(phi) * Math.cos(theta)), r * Math.cos(phi), r * Math.sin(phi) * Math.sin(theta)); }
 
-const container = $('canvas-container');
-const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-camera.position.set(0, 0, 3.5);
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-container.appendChild(renderer.domElement);
-
-const controls = new THREE.OrbitControls(camera, renderer.domElement); 
-controls.enableDamping = true; 
-controls.dampingFactor = 0.05; 
-controls.minDistance = 1.05; 
-controls.maxDistance = 10; 
-controls.enablePan = false;
-
-// CIV/SIMS VIBE: Lock the camera to an isometric "God Game" perspective
-controls.maxPolarAngle = Math.PI / 1.5; // Prevent looking from directly underneath
-controls.minPolarAngle = Math.PI / 6;   // Prevent looking directly down at the North Pole perfectly flat
-
+let container, scene, camera, renderer, controls, loader;
 loaded = 0; texs = {};
-const loader = new THREE.TextureLoader(); loader.crossOrigin = "Anonymous";
-for (let k in TEXTURES) texs[k] = loader.load(TEXTURES[k], () => { loaded++; $('loading-text').innerText = `Syncing data... ${Math.round((loaded / 4) * 100)}%`; if (loaded === 4) { initEarth(); setTimeout(() => { $('loading').style.opacity = '0'; setTimeout(() => $('loading').style.display = 'none', 1000); }, 500); } });
+
+document.addEventListener('DOMContentLoaded', () => {
+    container = $('canvas-container');
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 0, 3.5);
+
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    if (container) container.appendChild(renderer.domElement);
+
+    controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.minDistance = 1.05;
+    controls.maxDistance = 10;
+    controls.enablePan = false;
+    controls.maxPolarAngle = Math.PI / 1.5;
+    controls.minPolarAngle = Math.PI / 6;
+
+    loader = new THREE.TextureLoader(); loader.crossOrigin = "Anonymous";
+    for (let k in TEXTURES) texs[k] = loader.load(TEXTURES[k], () => {
+        const loadingText = $('loading-text');
+        if (loadingText) loadingText.innerText = `Syncing data... ${Math.round((loaded / 4) * 100)}%`;
+        loaded++;
+        if (loaded === 4) {
+            initEarth();
+            setTimeout(() => {
+                const loadingOverlay = $('loading');
+                if (loadingOverlay) loadingOverlay.style.opacity = '0';
+                setTimeout(() => { if (loadingOverlay) loadingOverlay.style.display = 'none'; }, 1000);
+            }, 500);
+        }
+    });
+
+    bindUI();
+});
 
 const eVS = `varying vec2 vUv; varying vec3 vNormal; varying vec3 vPosition; void main(){ vUv=uv; vNormal=normalize((modelMatrix*vec4(normal,0.0)).xyz); vPosition=(modelMatrix*vec4(position,1.0)).xyz; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`;
 const eFS = `
@@ -370,27 +388,125 @@ setInterval(() => {
 }, 100);
 
 function updateSimulation() {
-    const yr = sliderToYear(parseFloat($('slider-year').value)), mo = parseFloat($('slider-month').value), cl = getClimate(yr);
-    $('display-year').innerText = yr < 0 ? Math.abs(Math.round(yr)).toLocaleString() + " BCE" : Math.round(yr).toLocaleString() + " CE"; $('display-month').innerText = MONTHS[mo - 1];
-    const tilt = 23.3 + Math.sin(((yr - 2000) / 41000) * Math.PI * 2) * 1.2, pr = Math.abs(yr % 25772) / 25772 * 100;
-    $('data-tilt').innerText = tilt.toFixed(2) + "°"; $('bar-tilt').style.width = ((tilt - 22.1) / 2.4) * 100 + "%"; $('data-prec').innerText = pr.toFixed(1) + "%"; $('bar-prec').style.width = pr + "%";
-    if (celestial) { celestial.rotation.x = tilt * (Math.PI / 180); celestial.rotation.y = (yr - 2000) / 25772 * Math.PI * 2; sunLightPivot.rotation.y = ((mo - 1) / 12) * Math.PI * 2; }
-    if (earthMat) { earthMat.uniforms.uYear.value = yr; earthMat.uniforms.uMonth.value = mo; earthMat.uniforms.uTempDelta.value = cl.t; earthMat.uniforms.uSeaLevelDrop.value = Math.abs(cl.s); earthMat.uniforms.uHoloceneOptimum.value = (yr < -2000 && yr > -10000) ? 1.0 - Math.abs(yr + 6000) / 4000 : 0; }
-    $('data-temp').innerText = (cl.t > 0 ? "+" : "") + cl.t.toFixed(1) + " °C"; $('data-sea').innerText = cl.s.toFixed(1) + " m"; $('data-ice-bar').style.width = Math.min(Math.max(10 + Math.max(0, -cl.t) * 2.3 + Math.sin((mo / 12) * Math.PI * 2) * 1.5, 0), 100) + "%";
+    const sliderYear = $('slider-year');
+    const sliderMonth = $('slider-month');
+    if (!sliderYear || !sliderMonth) return;
+    const yr = sliderToYear(parseFloat(sliderYear.value));
+    const mo = parseFloat(sliderMonth.value);
+    const cl = getClimate(yr);
+
+    const displayYear = $('display-year');
+    const displayMonth = $('display-month');
+    const dataTilt = $('data-tilt');
+    const barTilt = $('bar-tilt');
+    const dataPrec = $('data-prec');
+    const barPrec = $('bar-prec');
+    const dataTemp = $('data-temp');
+    const dataSea = $('data-sea');
+    const dataIceBar = $('data-ice-bar');
+    if (!displayYear || !displayMonth || !dataTilt || !barTilt || !dataPrec || !barPrec || !dataTemp || !dataSea || !dataIceBar) return;
+
+    displayYear.innerText = yr < 0 ? Math.abs(Math.round(yr)).toLocaleString() + " BCE" : Math.round(yr).toLocaleString() + " CE";
+    displayMonth.innerText = MONTHS[mo - 1];
+    const tilt = 23.3 + Math.sin(((yr - 2000) / 41000) * Math.PI * 2) * 1.2;
+    const pr = Math.abs(yr % 25772) / 25772 * 100;
+    dataTilt.innerText = tilt.toFixed(2) + "°";
+    barTilt.style.width = ((tilt - 22.1) / 2.4) * 100 + "%";
+    dataPrec.innerText = pr.toFixed(1) + "%";
+    barPrec.style.width = pr + "%";
+
+    if (celestial) {
+        celestial.rotation.x = tilt * (Math.PI / 180);
+        celestial.rotation.y = (yr - 2000) / 25772 * Math.PI * 2;
+        if (sunLightPivot) sunLightPivot.rotation.y = ((mo - 1) / 12) * Math.PI * 2;
+    }
+    if (earthMat) {
+        earthMat.uniforms.uYear.value = yr;
+        earthMat.uniforms.uMonth.value = mo;
+        earthMat.uniforms.uTempDelta.value = cl.t;
+        earthMat.uniforms.uSeaLevelDrop.value = Math.abs(cl.s);
+        earthMat.uniforms.uHoloceneOptimum.value = (yr < -2000 && yr > -10000) ? 1.0 - Math.abs(yr + 6000) / 4000 : 0;
+    }
+    dataTemp.innerText = (cl.t > 0 ? "+" : "") + cl.t.toFixed(1) + " °C";
+    dataSea.innerText = cl.s.toFixed(1) + " m";
+    dataIceBar.style.width = Math.min(Math.max(10 + Math.max(0, -cl.t) * 2.3 + Math.sin((mo / 12) * Math.PI * 2) * 1.5, 0), 100) + "%";
 }
 
-$('slider-year').addEventListener('input', updateSimulation); $('slider-month').addEventListener('input', updateSimulation);
-document.querySelectorAll('.preset-btn').forEach(b => b.addEventListener('click', e => { $('slider-year').value = yearToSlider(parseFloat(e.target.getAttribute('data-year'))); updateSimulation(); }));
-$('toggle-spin').addEventListener('click', e => { isSpinning = !isSpinning; e.target.innerText = isSpinning ? "Pause Spin" : "Resume Spin"; e.target.classList.toggle('bg-red-500/50', !isSpinning); });
-$('toggle-clouds').addEventListener('click', e => { isCloudsVisible = !isCloudsVisible; cloudG.visible = cloudM.visible = isCloudsVisible; if (atmosG) atmosG.visible = isCloudsVisible && !is2DView; e.target.classList.toggle('bg-red-500/50', !isCloudsVisible); });
-$('toggle-astro').addEventListener('click', e => { isAstroVisible = !isAstroVisible; celestial.visible = isAstroVisible; e.target.classList.toggle('bg-red-500/50', !isAstroVisible); });
-$('toggle-ui').addEventListener('click', e => { isUIVisible = !isUIVisible; $('bottom-controls').classList.toggle('opacity-0', !isUIVisible); $('era-box').classList.toggle('opacity-0', !isUIVisible); e.target.classList.toggle('bg-blue-500/50', !isUIVisible); });
-$('toggle-migration').addEventListener('click', e => { isMigrationVisible = !isMigrationVisible; migG.visible = isMigrationVisible && !is2DView; migM.visible = isMigrationVisible && is2DView; e.target.classList.toggle('bg-red-500/50', isMigrationVisible); });
-$('toggle-view').addEventListener('click', e => {
-    is2DView = !is2DView; e.target.innerText = is2DView ? "3D Globe View" : "2D Map View"; earthG.visible = !is2DView; earthM.visible = is2DView;
-    cloudG.visible = isCloudsVisible && !is2DView; cloudM.visible = isCloudsVisible && is2DView; if (atmosG) atmosG.visible = isCloudsVisible && !is2DView;
-    migG.visible = isMigrationVisible && !is2DView; migM.visible = isMigrationVisible && is2DView;
-    if (earthMat) earthMat.uniforms.uIs2D.value = is2DView ? 1 : 0; controls.enableRotate = !is2DView; controls.enablePan = is2DView; controls.mouseButtons.LEFT = is2DView ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE; camera.position.set(0, 0, is2DView ? 2.8 : 3.5); controls.target.set(0, 0, 0);
-});
-$('toggle-data').addEventListener('click', e => { isDataView = !isDataView; if (earthMat) earthMat.uniforms.uViewMode.value = isDataView ? 1 : 0; e.target.classList.toggle('bg-red-500/50', isDataView); });
-window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
+function bindUI() {
+    const sliderYear = $('slider-year');
+    const sliderMonth = $('slider-month');
+    if (sliderYear) sliderYear.addEventListener('input', updateSimulation);
+    if (sliderMonth) sliderMonth.addEventListener('input', updateSimulation);
+
+    document.querySelectorAll('.preset-btn').forEach(b => {
+        b.addEventListener('click', e => {
+            const slider = $('slider-year');
+            if (!slider) return;
+            slider.value = yearToSlider(parseFloat(e.target.getAttribute('data-year')));
+            updateSimulation();
+        });
+    });
+
+    const toggleSpin = $('toggle-spin');
+    if (toggleSpin) toggleSpin.addEventListener('click', e => { isSpinning = !isSpinning; e.target.innerText = isSpinning ? 'Pause Spin' : 'Resume Spin'; e.target.classList.toggle('bg-red-500/50', !isSpinning); });
+
+    const toggleClouds = $('toggle-clouds');
+    if (toggleClouds) toggleClouds.addEventListener('click', e => {
+        isCloudsVisible = !isCloudsVisible;
+        if (cloudG) cloudG.visible = isCloudsVisible;
+        if (cloudM) cloudM.visible = isCloudsVisible;
+        if (atmosG) atmosG.visible = isCloudsVisible && !is2DView;
+        e.target.classList.toggle('bg-red-500/50', !isCloudsVisible);
+    });
+
+    const toggleAstro = $('toggle-astro');
+    if (toggleAstro) toggleAstro.addEventListener('click', e => { isAstroVisible = !isAstroVisible; if (celestial) celestial.visible = isAstroVisible; e.target.classList.toggle('bg-red-500/50', !isAstroVisible); });
+
+    const toggleUI = $('toggle-ui');
+    if (toggleUI) toggleUI.addEventListener('click', e => {
+        isUIVisible = !isUIVisible;
+        const bottomControls = $('bottom-controls');
+        const eraBox = $('era-box');
+        if (bottomControls) bottomControls.classList.toggle('opacity-0', !isUIVisible);
+        if (eraBox) eraBox.classList.toggle('opacity-0', !isUIVisible);
+        e.target.classList.toggle('bg-blue-500/50', !isUIVisible);
+    });
+
+    const toggleMigration = $('toggle-migration');
+    if (toggleMigration) toggleMigration.addEventListener('click', e => {
+        isMigrationVisible = !isMigrationVisible;
+        if (migG) migG.visible = isMigrationVisible && !is2DView;
+        if (migM) migM.visible = isMigrationVisible && is2DView;
+        e.target.classList.toggle('bg-red-500/50', isMigrationVisible);
+    });
+
+    const toggleView = $('toggle-view');
+    if (toggleView) toggleView.addEventListener('click', e => {
+        is2DView = !is2DView;
+        e.target.innerText = is2DView ? '3D Globe View' : '2D Map View';
+        if (earthG) earthG.visible = !is2DView;
+        if (earthM) earthM.visible = is2DView;
+        if (cloudG) cloudG.visible = isCloudsVisible && !is2DView;
+        if (cloudM) cloudM.visible = isCloudsVisible && is2DView;
+        if (atmosG) atmosG.visible = isCloudsVisible && !is2DView;
+        if (migG) migG.visible = isMigrationVisible && !is2DView;
+        if (migM) migM.visible = isMigrationVisible && is2DView;
+        if (earthMat) earthMat.uniforms.uIs2D.value = is2DView ? 1 : 0;
+        if (controls) controls.enableRotate = !is2DView;
+        if (controls) controls.enablePan = is2DView;
+        if (controls) controls.mouseButtons.LEFT = is2DView ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE;
+        if (camera) camera.position.set(0, 0, is2DView ? 2.8 : 3.5);
+        if (controls) controls.target.set(0, 0, 0);
+    });
+
+    const toggleData = $('toggle-data');
+    if (toggleData) toggleData.addEventListener('click', e => { isDataView = !isDataView; if (earthMat) earthMat.uniforms.uViewMode.value = isDataView ? 1 : 0; e.target.classList.toggle('bg-red-500/50', isDataView); });
+
+    window.addEventListener('resize', () => {
+        if (camera && renderer) {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+    });
+}
