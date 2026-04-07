@@ -42,6 +42,21 @@ input[type=range]:focus { outline: none; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* Settlement Hazard Icons */
+.settlement-icon {
+    position: absolute;
+    font-size: 8px;
+    font-weight: bold;
+    text-shadow: 0 0 3px rgba(0,0,0,1);
+    pointer-events: none;
+    z-index: 15;
+}
+.settlement-icon.flood { color: #0ea5e9; }
+.settlement-icon.freeze { color: #60a5fa; }
+.settlement-icon.heat { color: #f97316; }
+.settlement-icon.desert { color: #ef4444; }
+.settlement-icon.optimum { color: #f59e0b; }
+
 /* Point of Interest Markers */
 .poi-marker { 
     position: absolute; transform: translate(-50%, -50%); 

@@ -258,10 +258,14 @@ function initEarth() {
                     s.el.style.left = `${(tv.x * .5 + .5) * window.innerWidth}px`; 
                     s.el.style.top = `${(tv.y * -.5 + .5) * window.innerHeight - 15}px`; 
                     s.el.style.display = 'block'; 
+                    s.iconEl.style.left = `${(tv.x * .5 + .5) * window.innerWidth}px`; 
+                    s.iconEl.style.top = `${(tv.y * -.5 + .5) * window.innerHeight - 30}px`; 
+                    s.iconEl.style.display = 'block'; 
                     return; 
                 } 
             }
             s.el.style.display = 'none';
+            s.iconEl.style.display = 'none';
         });
 
         if (cloudG) {
@@ -322,7 +326,12 @@ window.addEventListener('dblclick', (event) => {
         el.title = `Founded ${foundYear < 0 ? Math.abs(foundYear) + ' BCE' : foundYear + ' CE'} at ${lat.toFixed(1)}°, ${lng.toFixed(1)}°`;
         $('poi-container').appendChild(el);
 
-        settlements.push({ lat, lng, mesh, el, pop: 100, active: true, parent: is2DView ? earthM : earthG, foundYear });
+        // Spawn Hazard Icon
+        const iconEl = document.createElement('div');
+        iconEl.className = 'settlement-icon';
+        $('poi-container').appendChild(iconEl);
+
+        settlements.push({ lat, lng, mesh, el, iconEl, pop: 100, active: true, parent: is2DView ? earthM : earthG, foundYear });
     }
 });
 
@@ -388,16 +397,38 @@ setInterval(() => {
             reason = 'Rising coastal stress';
         }
 
+        // SEA LEVEL FLOODING HAZARD
+        let isFlooded = false;
+        const seaLevel = getClimate(currentYear).s;
+        if (Math.abs(s.lat) < 25 && seaLevel > 30) { // Coastal flooding for low latitudes during high sea levels
+            isFlooded = true;
+            growthRate = Math.min(growthRate, 0.6); // Severe penalty
+            if (!reason.includes('flood')) reason = 'Coastal flooding';
+            statusColor = 0x0ea5e9; // Blue
+            textColor = 'text-sky-400';
+        }
+
         growthRate = Math.max(0.70, Math.min(growthRate, 1.20));
         s.pop = s.pop * growthRate;
         s.mesh.material.color.setHex(statusColor);
         s.el.className = `absolute text-[10px] font-mono font-bold pointer-events-none drop-shadow-[0_0_3px_rgba(0,0,0,1)] ${textColor}`;
         s.el.title = `${reason} (${Math.round((growthRate - 1) * 100)}% growth)`;
 
+        // Set Hazard Icon
+        let icon = '';
+        if (isFlooded) icon = '🌊';
+        else if (reason.includes('freeze')) icon = '❄️';
+        else if (reason.includes('heat')) icon = '🔥';
+        else if (reason.includes('desert')) icon = '🏜️';
+        else if (reason.includes('optimum')) icon = '🌱';
+        s.iconEl.innerText = icon;
+        s.iconEl.className = `settlement-icon ${isFlooded ? 'flood' : reason.includes('freeze') ? 'freeze' : reason.includes('heat') ? 'heat' : reason.includes('desert') ? 'desert' : reason.includes('optimum') ? 'optimum' : ''}`;
+
         if (s.pop < 1) { 
             s.active = false; 
             s.pop = 0; 
             s.el.style.opacity = 0; 
+            s.iconEl.style.opacity = 0;
             s.mesh.visible = false; 
         } else { 
             s.el.innerText = Math.floor(s.pop).toLocaleString(); 
