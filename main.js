@@ -7,6 +7,9 @@ const TEXTURES = {
     clouds: 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_clouds_1024.png'
 };
 
+// FIX: Declare global UI states immediately so they are ready before the render loop starts!
+let isSpinning = true, is2DView = false, isDataView = false, isAstroVisible = true, isCloudsVisible = true, isUIVisible = true, isMigrationVisible = false;
+
 const POIS = [
     { id: 'poi-beringia', title: 'Beringia Land Bridge', desc: 'Migration route to the Americas.', lat: 65.0, lng: -168.0, minYear: -30000, maxYear: -11000 },
     { id: 'poi-doggerland', title: 'Doggerland', desc: 'Connected UK to Mainland Europe.', lat: 54.0, lng: 3.0, minYear: -100000, maxYear: -6500 },
