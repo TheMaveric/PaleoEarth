@@ -10,6 +10,11 @@ const TEXTURES = {
 // FIX: Declare global UI states immediately so they are ready before the render loop starts!
 let isSpinning = true, is2DView = false, isDataView = false, isAstroVisible = true, isCloudsVisible = true, isUIVisible = true, isMigrationVisible = false;
 
+// Scene variables will be initialized after Three.js is loaded
+let earthMat, earthG, cloudG, earthM, cloudM, celestial, sunM, atmosM, atmosG, migG, migM, sunLightPivot, cm;
+let loaded = 0, texs = {};
+let physicsEngine;
+
 const POIS = [
     { id: 'poi-beringia', title: 'Beringia Land Bridge', desc: 'Migration route to the Americas.', lat: 65.0, lng: -168.0, minYear: -30000, maxYear: -11000 },
     { id: 'poi-doggerland', title: 'Doggerland', desc: 'Connected UK to Mainland Europe.', lat: 54.0, lng: 3.0, minYear: -100000, maxYear: -6500 },
@@ -69,7 +74,7 @@ class NBodyPhysics {
     }
     getEcc() { const e = (this.eMax - this.eMin) / (this.eMax + this.eMin); return isNaN(e) ? 0.016 : e; }
 }
-const physicsEngine = new NBodyPhysics();
+physicsEngine = new NBodyPhysics();
 
 function latLngToVec(lat, lng, r) { const phi = (90 - lat) * (Math.PI / 180), theta = (lng + 180) * (Math.PI / 180); return new THREE.Vector3(-(r * Math.sin(phi) * Math.cos(theta)), r * Math.cos(phi), r * Math.sin(phi) * Math.sin(theta)); }
 
@@ -92,7 +97,7 @@ controls.enablePan = false;
 controls.maxPolarAngle = Math.PI / 1.5; // Prevent looking from directly underneath
 controls.minPolarAngle = Math.PI / 6;   // Prevent looking directly down at the North Pole perfectly flat
 
-let loaded = 0, texs = {}, earthMat, earthG, cloudG, earthM, cloudM, celestial, sunM, atmosM, atmosG, migG, migM;
+loaded = 0; texs = {};
 const loader = new THREE.TextureLoader(); loader.crossOrigin = "Anonymous";
 for (let k in TEXTURES) texs[k] = loader.load(TEXTURES[k], () => { loaded++; $('loading-text').innerText = `Syncing data... ${Math.round((loaded / 4) * 100)}%`; if (loaded === 4) { initEarth(); setTimeout(() => { $('loading').style.opacity = '0'; setTimeout(() => $('loading').style.display = 'none', 1000); }, 500); } });
 
@@ -243,7 +248,7 @@ function updateSimulation() {
 $('slider-year').addEventListener('input', updateSimulation); $('slider-month').addEventListener('input', updateSimulation);
 document.querySelectorAll('.preset-btn').forEach(b => b.addEventListener('click', e => { $('slider-year').value = yearToSlider(parseFloat(e.target.getAttribute('data-year'))); updateSimulation(); }));
 $('toggle-spin').addEventListener('click', e => { isSpinning = !isSpinning; e.target.innerText = isSpinning ? "Pause Spin" : "Resume Spin"; e.target.classList.toggle('bg-red-500/50', !isSpinning); });
-$('toggle-clouds').addEventListener('click', e => { isCloudsVisible = !isCloudsVisible; cloudGlobe.visible = cloudMap.visible = isCloudsVisible; if (atmosG) atmosG.visible = isCloudsVisible && !is2DView; e.target.classList.toggle('bg-red-500/50', !isCloudsVisible); });
+$('toggle-clouds').addEventListener('click', e => { isCloudsVisible = !isCloudsVisible; cloudG.visible = cloudM.visible = isCloudsVisible; if (atmosG) atmosG.visible = isCloudsVisible && !is2DView; e.target.classList.toggle('bg-red-500/50', !isCloudsVisible); });
 $('toggle-astro').addEventListener('click', e => { isAstroVisible = !isAstroVisible; celestial.visible = isAstroVisible; e.target.classList.toggle('bg-red-500/50', !isAstroVisible); });
 $('toggle-ui').addEventListener('click', e => { isUIVisible = !isUIVisible; $('bottom-controls').classList.toggle('opacity-0', !isUIVisible); $('era-box').classList.toggle('opacity-0', !isUIVisible); e.target.classList.toggle('bg-blue-500/50', !isUIVisible); });
 $('toggle-migration').addEventListener('click', e => { isMigrationVisible = !isMigrationVisible; migG.visible = isMigrationVisible && !is2DView; migM.visible = isMigrationVisible && is2DView; e.target.classList.toggle('bg-red-500/50', isMigrationVisible); });
