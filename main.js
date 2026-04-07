@@ -78,8 +78,16 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 container.appendChild(renderer.domElement);
 
-const controls = new THREE.OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true; controls.minDistance = 1.05; controls.maxDistance = 10; controls.enablePan = false;
+const controls = new THREE.OrbitControls(camera, renderer.domElement); 
+controls.enableDamping = true; 
+controls.dampingFactor = 0.05; 
+controls.minDistance = 1.05; 
+controls.maxDistance = 10; 
+controls.enablePan = false;
+
+// CIV/SIMS VIBE: Lock the camera to an isometric "God Game" perspective
+controls.maxPolarAngle = Math.PI / 1.5; // Prevent looking from directly underneath
+controls.minPolarAngle = Math.PI / 6;   // Prevent looking directly down at the North Pole perfectly flat
 
 let loaded = 0, texs = {}, earthMat, earthG, cloudG, earthM, cloudM, celestial, sunM, atmosM, atmosG, migG, migM;
 const loader = new THREE.TextureLoader(); loader.crossOrigin = "Anonymous";

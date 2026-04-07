@@ -64,3 +64,56 @@ input[type=range]:focus { outline: none; }
     70% { transform: scale(1.1); box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); } 
     100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } 
 }
+
+/* ... Keep existing body and layout CSS ... */
+
+/* Grand Strategy Custom Sliders */
+input[type=range] { -webkit-appearance: none; width: 100%; background: transparent; }
+input[type=range]::-webkit-slider-thumb { 
+    -webkit-appearance: none; 
+    height: 14px; 
+    width: 14px; 
+    border-radius: 50%; 
+    background: #fbbf24; /* Gold map pin */
+    border: 2px solid #fff;
+    cursor: pointer; 
+    margin-top: -5px; 
+    box-shadow: 0 0 8px rgba(251, 191, 36, 0.6); 
+}
+input[type=range]::-webkit-slider-runnable-track { 
+    width: 100%; 
+    height: 4px; 
+    cursor: pointer; 
+    background: rgba(212, 175, 55, 0.2); 
+    border: 1px solid rgba(212, 175, 55, 0.4);
+    border-radius: 2px; 
+}
+input[type=range]:focus { outline: none; }
+
+/* Strategy Game Button Class */
+.civ-btn {
+    background-color: rgba(15, 23, 42, 0.85); /* Slate 900 */
+    border: 1px solid rgba(217, 119, 6, 0.6); /* Amber 600 */
+    color: rgba(254, 243, 199, 0.9); /* Amber 100 */
+    font-family: 'Cinzel', serif;
+    font-size: 10px;
+    padding: 4px 8px;
+    border-radius: 3px;
+    box-shadow: inset 0 0 5px rgba(0,0,0,0.5), 0 2px 4px rgba(0,0,0,0.5);
+    text-transform: uppercase;
+    transition: all 0.2s ease;
+    cursor: pointer;
+}
+.civ-btn:hover {
+    background-color: rgba(120, 53, 15, 0.7); /* Amber 900 */
+    border-color: rgba(251, 191, 36, 0.8); /* Amber 400 */
+    box-shadow: inset 0 0 10px rgba(251, 191, 36, 0.2), 0 2px 6px rgba(0,0,0,0.6);
+}
+.civ-btn.active {
+    background-color: rgba(180, 83, 9, 0.9); /* Amber 700 */
+    color: white;
+}
+
+/* ... Keep existing POI and Loading CSS ... */
+.font-cinzel { font-family: 'Cinzel', serif; }
+.font-lora { font-family: 'Lora', serif; }
