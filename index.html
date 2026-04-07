@@ -79,6 +79,10 @@
                             <div id="data-ice-bar" class="bg-blue-400 h-[4px] rounded-full transition-all duration-300 mt-[1px] ml-[1px]" style="width: 10%;"></div>
                         </div>
                     </div>
+                    <div class="col-span-2 mt-1">
+                        <div class="text-[10px] text-amber-100/70">Cities Founded</div>
+                        <div id="data-city-count" class="text-sm font-mono font-bold text-sky-300 mt-0.5">0</div>
+                    </div>
                     <div class="col-span-2 pt-1 border-t border-white/5">
                         <div class="flex justify-between items-end">
                             <div class="text-[10px] text-amber-100/70 font-cinzel">Total Population</div>
@@ -94,6 +98,7 @@
                     <div>
                         <div class="flex justify-between text-[10px] text-amber-100/70 mb-1 font-cinzel"><span>-6M Yrs (Miocene)</span><span class="font-bold text-amber-400">Year</span><span>Present Day</span></div>
                         <input type="range" id="slider-year" min="0" max="1000" value="1000" step="1">
+                        <div class="text-[10px] text-amber-200/70 italic mt-2">Double-click anywhere on the globe or map to found a settlement. Population changes with climate.</div>
                         <div class="flex flex-wrap mt-1.5 gap-1.5">
                             <button class="preset-btn flex-1 bg-slate-800 hover:bg-amber-900/50 border border-amber-600/50 rounded-sm py-1 text-[9px] font-cinzel text-amber-100 transition shadow-sm" data-year="-5330000">Zanclean Flood</button>
                             <button class="preset-btn flex-1 bg-slate-800 hover:bg-amber-900/50 border border-amber-600/50 rounded-sm py-1 text-[9px] font-cinzel text-amber-100 transition shadow-sm" data-year="-3000000">Isthmus of Panama</button>

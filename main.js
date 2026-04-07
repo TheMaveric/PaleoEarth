@@ -218,7 +218,7 @@ function initEarth() {
     const sGeo = new THREE.BufferGeometry(); sGeo.setAttribute('position', new THREE.BufferAttribute(stars, 3)); celestial.add(new THREE.Points(sGeo, new THREE.PointsMaterial({ size: 0.1, color: 0xffffff, transparent: true, opacity: 0.8 })));
     sunLightPivot = new THREE.Group(); celestial.add(sunLightPivot); sunM = new THREE.Mesh(new THREE.SphereGeometry(2, 16, 16), new THREE.MeshBasicMaterial({ color: 0xffea00 })); sunM.position.set(95, 0, 0); sunLightPivot.add(sunM); const sl = new THREE.DirectionalLight(0xffffff, 1.2); sl.position.set(50, 0, 0); sunLightPivot.add(sl);
 
-    const cm = new THREE.MeshLambertMaterial({ map: texs.clouds, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false });
+    cm = new THREE.MeshLambertMaterial({ map: texs.clouds, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false });
     cloudG = new THREE.Mesh(new THREE.SphereGeometry(1.015, 64, 64), cm); scene.add(cloudG); cloudM = new THREE.Mesh(new THREE.PlaneGeometry(4, 2, 64, 64), cm); cloudM.position.z = 0.05; cloudM.visible = false; scene.add(cloudM);
 
     let lt = 0; function animate(t) {
@@ -299,31 +299,30 @@ window.addEventListener('dblclick', (event) => {
 
     if (intersects.length > 0) {
         const point = intersects[0].point;
-        
-        // Calculate rough latitude for climate survival math
-        let lat = 0;
+        let lat = 0, lng = 0;
         if (is2DView) {
-            lat = (point.y / 1.0) * 90; // 2D map height is 2.0 (-1 to 1)
+            lat = (point.y / 1.0) * 90;
+            lng = (point.x / 2.0) * 180;
         } else {
-            lat = Math.asin(point.y / 1.0) * (180 / Math.PI); // 3D Sphere radius is 1.0
+            lat = Math.asin(point.y / 1.0) * (180 / Math.PI);
+            lng = Math.atan2(point.z, -point.x) * (180 / Math.PI) - 180;
         }
+        const foundYear = Math.round(sliderToYear(parseFloat($('slider-year').value)));
 
-        // Spawn City Mesh
         const geo = new THREE.SphereGeometry(0.015, 8, 8);
-        const mat = new THREE.MeshBasicMaterial({ color: 0x22c55e }); // Start Green
+        const mat = new THREE.MeshBasicMaterial({ color: 0x22c55e });
         const mesh = new THREE.Mesh(geo, mat);
         
-        // Attach the city to the actual globe/map so it rotates/pans with it
         mesh.position.copy(is2DView ? point : earthG.worldToLocal(point.clone()));
         (is2DView ? earthM : earthG).add(mesh);
 
-        // Spawn Population Label
         const el = document.createElement('div');
         el.className = 'absolute text-[10px] font-mono text-green-400 font-bold pointer-events-none drop-shadow-[0_0_3px_rgba(0,0,0,1)] transition-colors duration-300';
         el.innerText = '100';
+        el.title = `Founded ${foundYear < 0 ? Math.abs(foundYear) + ' BCE' : foundYear + ' CE'} at ${lat.toFixed(1)}°, ${lng.toFixed(1)}°`;
         $('poi-container').appendChild(el);
 
-        settlements.push({ lat: lat, mesh: mesh, el: el, pop: 100, active: true, parent: is2DView ? earthM : earthG });
+        settlements.push({ lat, lng, mesh, el, pop: 100, active: true, parent: is2DView ? earthM : earthG, foundYear });
     }
 });
 
@@ -336,43 +335,65 @@ setInterval(() => {
 
     // --- NEW: Settlement Survival Logic ---
     let totalPop = 0;
+    let activeCities = 0;
     const currentYear = sliderToYear(parseFloat($('slider-year').value));
     const currentTemp = getClimate(currentYear).t;
-    const isHolocene = (currentYear < -2000 && currentYear > -10000); // Green Sahara Era
+    const isHolocene = (currentYear < -2000 && currentYear > -10000);
     
     settlements.forEach(s => {
         if (!s.active) return;
         
-        let growthRate = 1.02; // Base +2% growth
-        let statusColor = 0x22c55e; // Green
+        let growthRate = 1.02;
+        let statusColor = 0x22c55e;
         let textColor = 'text-green-400';
+        let reason = 'Stable climate';
 
-        // HARSH CLIMATE RULES
         if (Math.abs(s.lat) > 45 && currentTemp < -3.0) {
-            // ICE AGE DEATH: High latitudes freeze during glacial maximums
-            growthRate = 0.85; // -15% death rate
-            statusColor = 0x3b82f6; // Blue (Freezing)
-            textColor = 'text-blue-400';
-        } 
-        else if (Math.abs(s.lat) > 15 && Math.abs(s.lat) < 35 && !isHolocene) {
-            // DESERTIFICATION DEATH: Sahara/Arabia without the Holocene Optimum
-            growthRate = 0.90; // -10% death rate
-            statusColor = 0xef4444; // Red (Starving)
+            growthRate = 0.82;
+            statusColor = 0x3b82f6;
+            textColor = 'text-sky-400';
+            reason = 'High latitude freeze';
+        } else if (Math.abs(s.lat) > 15 && Math.abs(s.lat) < 35 && !isHolocene) {
+            growthRate = 0.90;
+            statusColor = 0xef4444;
             textColor = 'text-red-400';
-        }
-        else if (isHolocene && Math.abs(s.lat) > 10 && Math.abs(s.lat) < 35) {
-            // GOLDEN AGE: Massive growth in the Green Sahara!
-            growthRate = 1.15; // +15% explosion!
-            statusColor = 0xfbbf24; // Gold (Thriving)
+            reason = 'Desertification stress';
+        } else if (Math.abs(s.lat) < 20 && currentTemp > 3.0) {
+            growthRate = 0.88;
+            statusColor = 0xf97316;
+            textColor = 'text-orange-400';
+            reason = 'Tropical heat stress';
+        } else if (isHolocene && Math.abs(s.lat) > 10 && Math.abs(s.lat) < 35) {
+            growthRate = 1.12;
+            statusColor = 0xfbbf24;
             textColor = 'text-amber-400';
+            reason = 'Holocene optimum';
+        } else if (currentTemp < -1.5 && Math.abs(s.lat) < 20) {
+            growthRate = 0.95;
+            statusColor = 0x60a5fa;
+            textColor = 'text-sky-300';
+            reason = 'Cold low-latitude stress';
+        } else if (Math.abs(s.lat) < 15 && currentTemp > 1.5) {
+            growthRate = 1.05;
+            statusColor = 0x22c55e;
+            textColor = 'text-emerald-400';
+            reason = 'Warm coastal growth';
         }
 
-        // Apply Math
+        const seaPressure = Math.max(0, currentTemp - 2.0) * 0.03;
+        if (seaPressure > 0 && Math.abs(s.lat) < 30) {
+            growthRate -= seaPressure;
+            statusColor = 0xf97316;
+            textColor = 'text-orange-400';
+            reason = 'Rising coastal stress';
+        }
+
+        growthRate = Math.max(0.70, Math.min(growthRate, 1.20));
         s.pop = s.pop * growthRate;
         s.mesh.material.color.setHex(statusColor);
         s.el.className = `absolute text-[10px] font-mono font-bold pointer-events-none drop-shadow-[0_0_3px_rgba(0,0,0,1)] ${textColor}`;
+        s.el.title = `${reason} (${Math.round((growthRate - 1) * 100)}% growth)`;
 
-        // Collapse Condition
         if (s.pop < 1) { 
             s.active = false; 
             s.pop = 0; 
@@ -381,10 +402,13 @@ setInterval(() => {
         } else { 
             s.el.innerText = Math.floor(s.pop).toLocaleString(); 
             totalPop += Math.floor(s.pop); 
+            activeCities += 1;
         }
     });
 
     $('data-pop').innerText = totalPop.toLocaleString();
+    const cityCountEl = $('data-city-count');
+    if (cityCountEl) cityCountEl.innerText = activeCities.toString();
 }, 100);
 
 function updateSimulation() {
@@ -497,16 +521,19 @@ function bindUI() {
         if (controls) controls.mouseButtons.LEFT = is2DView ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE;
         if (camera) camera.position.set(0, 0, is2DView ? 2.8 : 3.5);
         if (controls) controls.target.set(0, 0, 0);
-    });
 
-    const toggleData = $('toggle-data');
-    if (toggleData) toggleData.addEventListener('click', e => { isDataView = !isDataView; if (earthMat) earthMat.uniforms.uViewMode.value = isDataView ? 1 : 0; e.target.classList.toggle('bg-red-500/50', isDataView); });
-
-    window.addEventListener('resize', () => {
-        if (camera && renderer) {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        }
-    });
-}
+            settlements.forEach(s => {
+                if (!s.active) return;
+                if (s.mesh.parent) s.mesh.parent.remove(s.mesh);
+                const targetParent = is2DView ? earthM : earthG;
+                if (!targetParent) return;
+                if (is2DView) {
+                    s.mesh.position.set((s.lng / 180) * 2, (s.lat / 90) * 1, 0.02);
+                } else {
+                    s.mesh.position.copy(earthG.worldToLocal(latLngToVec(s.lat, s.lng, 1.0)));
+                }
+                targetParent.add(s.mesh);
+                s.parent = targetParent;
+            });
+        });
+    }
