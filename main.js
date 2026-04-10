@@ -283,22 +283,91 @@ function initEarth() {
 }
 
 // ==========================================
-// GAME MECHANICS: SETTLEMENTS & SURVIVAL
+// GAME MECHANICS: SETTLEMENTS, RESOURCES & SURVIVAL
 // ==========================================
 let settlements = [];
+let resources = [];
+let tradeRoutes = [];
+let events = [];
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 
-// 1. Double Click to Settle
-window.addEventListener('dblclick', (event) => {
-    // Ignore clicks if they are on the UI panels
-    if (event.clientY > window.innerHeight - 150) return; 
+// Resource Types: each has different effects
+const RESOURCE_TYPES = {
+    FOREST: { icon: '🌲', color: 0x15803d, name: 'Forest', growth: 0.15 },
+    FISH: { icon: '🐟', color: 0x0ea5e9, name: 'Fish Stocks', growth: 0.12 },
+    MINERALS: { icon: '⛏️', color: 0xa78bfa, name: 'Minerals', growth: 0.08 },
+    FERTILE: { icon: '🌾', color: 0xeab308, name: 'Fertile Land', growth: 0.20 },
+    FRESHWATER: { icon: '💧', color: 0x06b6d4, name: 'Fresh Water', growth: 0.10 }
+};
+
+// Natural Disaster Events
+const DISASTER_TYPES = {
+    VOLCANO: { name: 'Volcanic Eruption', severity: 0.4, radius: 0.15 },
+    EARTHQUAKE: { name: 'Earthquake', severity: 0.25, radius: 0.12 },
+    TSUNAMI: { name: 'Tsunami', severity: 0.35, radius: 0.20 },
+    DROUGHT: { name: 'Severe Drought', severity: 0.30, radius: 0.08 },
+    FLOOD: { name: 'Flash Flood', severity: 0.20, radius: 0.10 }
+};
+
+// Perlin Noise for resource placement
+function perlinNoise(x, y, z = 0) {
+    const n = Math.sin(x * 12.9898 + y * 78.233 + z * 43.14) * 43758.5453;
+    return n - Math.floor(n);
+}
+
+// Improved Heightmap-based resource generation
+function generateResourcesForRegion(lat, lng, currentYear) {
+    const resources = [];
+    
+    // Multi-octave Perlin noise for realistic distribution
+    const noise1 = perlinNoise(lat * 0.5, lng * 0.5, 42);
+    const noise2 = perlinNoise(lat * 1.2, lng * 1.2, 43);
+    const noise3 = perlinNoise(lat * 0.2, lng * 0.2, 44);
+    const combinedNoise = (noise1 + noise2 * 0.5 + noise3 * 0.3) / 1.8;
+    
+    // Elevation-based terrain coloring (simplified heightmap)
+    const elevation = combinedNoise * 8848; // Mount Everest height
+    
+    // Forests in mid-altitude, mid-latitude zones
+    if (Math.abs(lat) < 60 && Math.abs(lat) > 10 && elevation > 500 && elevation < 3000 && noise1 > 0.5) {
+        resources.push({ type: 'FOREST', strength: 0.6 + noise1 * 0.4 });
+    }
+    
+    // Fish stocks along coast (low elevation near water)
+    if (elevation < 500 && perlinNoise(lat, lng, 1) > 0.65 && Math.abs(lat) < 80) {
+        resources.push({ type: 'FISH', strength: 0.5 + perlinNoise(lat * 2, lng * 2, 1) * 0.5 });
+    }
+    
+    // Minerals in mountainous regions (high elevation)
+    if (elevation > 2000 && perlinNoise(lat * 0.3, lng * 0.3, 2) > 0.65) {
+        resources.push({ type: 'MINERALS', strength: 0.4 + perlinNoise(lat, lng, 2) * 0.6 });
+    }
+    
+    // Fertile lands in Holocene optimal zones
+    if (currentYear > -10000 && currentYear < -2000 && Math.abs(lat - 15) < 25 && lng > -30 && lng < 50) {
+        resources.push({ type: 'FERTILE', strength: 0.8 });
+    } else if (Math.abs(lat) < 40 && elevation < 1000 && elevation > 100 && noise1 > 0.55) {
+        resources.push({ type: 'FERTILE', strength: 0.5 + noise1 * 0.5 });
+    }
+    
+    // Fresh water sources (river valleys - low to mid elevation)
+    if (elevation > 100 && elevation < 1500 && perlinNoise(lat, lng, 3) > 0.72) {
+        resources.push({ type: 'FRESHWATER', strength: 0.6 });
+    }
+    
+    return resources;
+}
+
+// 1. Right Click to Place Resources (for gameplay)
+window.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+    if (event.clientY > window.innerHeight - 150) return;
 
     mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
     mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
     raycaster.setFromCamera(mouse, camera);
-    // Raycast against the currently visible Earth (3D or 2D)
     const intersects = raycaster.intersectObject(is2DView ? earthM : earthG);
 
     if (intersects.length > 0) {
@@ -311,52 +380,208 @@ window.addEventListener('dblclick', (event) => {
             lat = Math.asin(point.y / 1.0) * (180 / Math.PI);
             lng = Math.atan2(point.z, -point.x) * (180 / Math.PI) - 180;
         }
-        const foundYear = Math.round(sliderToYear(parseFloat($('slider-year').value)));
-
-        const geo = new THREE.SphereGeometry(0.015, 8, 8);
-        const mat = new THREE.MeshBasicMaterial({ color: 0x22c55e });
-        const mesh = new THREE.Mesh(geo, mat);
         
-        mesh.position.copy(is2DView ? point : earthG.worldToLocal(point.clone()));
-        (is2DView ? earthM : earthG).add(mesh);
-
-        const el = document.createElement('div');
-        el.className = 'absolute text-[10px] font-mono text-green-400 font-bold pointer-events-none drop-shadow-[0_0_3px_rgba(0,0,0,1)] transition-colors duration-300';
-        el.innerText = '100';
-        el.title = `Founded ${foundYear < 0 ? Math.abs(foundYear) + ' BCE' : foundYear + ' CE'} at ${lat.toFixed(1)}°, ${lng.toFixed(1)}°`;
-        $('poi-container').appendChild(el);
-
-        // Spawn Hazard Icon
-        const iconEl = document.createElement('div');
-        iconEl.className = 'settlement-icon';
-        $('poi-container').appendChild(iconEl);
-
-        settlements.push({ lat, lng, mesh, el, iconEl, pop: 100, active: true, parent: is2DView ? earthM : earthG, foundYear });
+        // Randomly select a resource type
+        const resTypeKeys = Object.keys(RESOURCE_TYPES);
+        const resType = resTypeKeys[Math.floor(Math.random() * resTypeKeys.length)];
+        
+        addResource(lat, lng, resType, point);
     }
 });
 
-// 2. The Game Loop (Runs 10x a second)
+// 2. Double Click to Settle (Enhanced)
+window.addEventListener('dblclick', (event) => {
+    // Ignore clicks if they are on the UI panels
+    if (event.clientY > window.innerHeight - 150) return; 
+
+    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+    raycaster.setFromCamera(mouse, camera);
+    const intersects = raycaster.intersectObject(is2DView ? earthM : earthG);
+
+    if (intersects.length > 0) {
+        const point = intersects[0].point;
+        let lat = 0, lng = 0;
+        if (is2DView) {
+            lat = (point.y / 1.0) * 90;
+            lng = (point.x / 2.0) * 180;
+        } else {
+            lat = Math.asin(point.y / 1.0) * (180 / Math.PI);
+            lng = Math.atan2(point.z, -point.x) * (180 / Math.PI) - 180;
+        }
+        
+        addSettlement(lat, lng, point);
+    }
+});
+
+function addSettlement(lat, lng, meshPoint) {
+    const foundYear = Math.round(sliderToYear(parseFloat($('slider-year').value)));
+    const currentYear = sliderToYear(parseFloat($('slider-year').value));
+
+    const geo = new THREE.SphereGeometry(0.015, 8, 8);
+    const mat = new THREE.MeshBasicMaterial({ color: 0x22c55e });
+    const mesh = new THREE.Mesh(geo, mat);
+    
+    mesh.position.copy(is2DView ? meshPoint : earthG.worldToLocal(meshPoint.clone()));
+    (is2DView ? earthM : earthG).add(mesh);
+
+    const el = document.createElement('div');
+    el.className = 'absolute text-[10px] font-mono text-green-400 font-bold pointer-events-none drop-shadow-[0_0_3px_rgba(0,0,0,1)] transition-colors duration-300 cursor-pointer hover:text-amber-300';
+    el.innerText = '100';
+    el.title = `Founded ${foundYear < 0 ? Math.abs(foundYear) + ' BCE' : foundYear + ' CE'} at ${lat.toFixed(1)}°, ${lng.toFixed(1)}°`;
+    $('poi-container').appendChild(el);
+
+    const iconEl = document.createElement('div');
+    iconEl.className = 'settlement-icon';
+    $('poi-container').appendChild(iconEl);
+
+    // Generate city name
+    const names = ['Alexandria', 'Memphis', 'Tyre', 'Babylon', 'Athens', 'Roma', 'Chang\'an', 'Harappa', 'Cahokia', 'Cuzco', 'Tenochtitlán', 'Samarqand'];
+    const name = names[Math.floor(Math.random() * names.length)] + ' ' + Math.round(Math.random() * 9000);
+
+    // Find nearby resources
+    const nearbyResources = generateResourcesForRegion(lat, lng, currentYear);
+    
+    const settlement = {
+        name,
+        lat, lng, mesh, el, iconEl,
+        pop: 150,
+        active: true,
+        parent: is2DView ? earthM : earthG,
+        foundYear,
+        resources: nearbyResources,
+        wealth: 100,
+        culture: 0,
+        tech: 1,
+        tradesCount: 0,
+        id: settlements.length
+    };
+
+    settlements.push(settlement);
+    el.title = `${settlement.name}\nPopulation: ${Math.round(settlement.pop)}\nWealth: ${Math.round(settlement.wealth)}\nTech Level: ${settlement.tech}`;
+    
+    // Bonus: 50% chance to generate resources nearby
+    if (Math.random() > 0.5) {
+        for (let i = 0; i < 2; i++) {
+            const offset = (Math.random() - 0.5) * 10;
+            const type = Object.keys(RESOURCE_TYPES)[Math.floor(Math.random() * Object.keys(RESOURCE_TYPES).length)];
+            addResource(lat + offset, lng + (Math.random() - 0.5) * 10, type, null);
+        }
+    }
+}
+
+function addResource(lat, lng, resourceType, meshPoint) {
+    const typeData = RESOURCE_TYPES[resourceType];
+    if (!typeData) return;
+
+    if (!meshPoint) {
+        // Generate mesh point if not provided
+        const phi = (90 - lat) * (Math.PI / 180);
+        const theta = (lng + 180) * (Math.PI / 180);
+        meshPoint = new THREE.Vector3(-(Math.sin(phi) * Math.cos(theta)), Math.cos(phi), Math.sin(phi) * Math.sin(theta));
+    }
+
+    const scale = 0.008;
+    const geo = new THREE.SphereGeometry(scale, 6, 6);
+    const mat = new THREE.MeshBasicMaterial({ color: typeData.color, transparent: true, opacity: 0.7 });
+    const mesh = new THREE.Mesh(geo, mat);
+    
+    mesh.position.copy(is2DView ? meshPoint : earthG.worldToLocal(meshPoint.clone()));
+    (is2DView ? earthM : earthG).add(mesh);
+
+    const el = document.createElement('div');
+    el.className = `absolute text-[8px] pointer-events-none drop-shadow-lg font-bold`;
+    el.innerText = typeData.icon;
+    $('poi-container').appendChild(el);
+
+    resources.push({
+        type: resourceType,
+        lat, lng, mesh, el,
+        strength: 0.5 + Math.random() * 0.5,
+        parent: is2DView ? earthM : earthG
+    });
+}
+
+// 2. The Game Loop (Runs 10x a second) with Enhanced Mechanics
+let disasterCooldown = 0;
 setInterval(() => {
     // Update N-Body UI (Existing code)
     const e = physicsEngine.getEcc(); 
     $('data-ecc').innerText = e.toFixed(4); 
     $('bar-ecc').style.width = ((e - 0.0034) / 0.0546) * 100 + "%"; 
 
-    // --- NEW: Settlement Survival Logic ---
+    // --- Natural Disaster System ---
+    if (Math.random() < 0.01 && settlements.length > 0 && disasterCooldown === 0) {
+        const disaster = Object.entries(DISASTER_TYPES)[Math.floor(Math.random() * Object.keys(DISASTER_TYPES).length)];
+        const target = settlements[Math.floor(Math.random() * settlements.length)];
+        
+        if (target && target.active) {
+            triggerDisaster(target, disaster[1], disaster[0]);
+            disasterCooldown = 50; // 5 second cooldown
+        }
+    }
+    if (disasterCooldown > 0) disasterCooldown--;
+
+    // --- Trade Route System ---
+    if (settlements.length > 1 && Math.random() < 0.02) {
+        const s1 = settlements[Math.floor(Math.random() * settlements.length)];
+        const s2 = settlements[Math.floor(Math.random() * settlements.length)];
+        
+        if (s1 !== s2 && s1.active && s2.active && Math.random() > 0.7) {
+            initiateTradeRoute(s1, s2);
+        }
+    }
+
+    // Update Trade Route rendering (3D lines)
+    tradeRoutes.forEach((route, idx) => {
+        route.lifetime--;
+        if (route.lifetime <= 0) {
+            if (route.mesh) route.mesh.parent.remove(route.mesh);
+            tradeRoutes.splice(idx, 1);
+        } else {
+            // Update mesh material opacity based on remaining lifetime
+            if (route.mesh && route.mesh.material) {
+                route.mesh.material.opacity = (route.lifetime / 100) * 0.6;
+            }
+        }
+    });
+
+    // --- Settlement Survival Logic (Enhanced) ---
     let totalPop = 0;
     let activeCities = 0;
+    let totalWealth = 0;
+    let totalTech = 0;
     const currentYear = sliderToYear(parseFloat($('slider-year').value));
     const currentTemp = getClimate(currentYear).t;
+    const currentSea = getClimate(currentYear).s;
     const isHolocene = (currentYear < -2000 && currentYear > -10000);
     
     settlements.forEach(s => {
         if (!s.active) return;
         
-        let growthRate = 1.02;
+        let growthRate = 1.01;
         let statusColor = 0x22c55e;
         let textColor = 'text-green-400';
         let reason = 'Stable climate';
 
+        // Wealth generation from resources
+        let resourceBonus = 0;
+        s.resources.forEach(res => {
+            const typeData = RESOURCE_TYPES[res.type];
+            resourceBonus += res.strength * typeData.growth;
+        });
+        
+        // Trade income
+        const tradeIncome = (s.tradesCount * 0.5) / 10; // Decay per cycle
+        s.tradesCount = Math.max(0, s.tradesCount - 0.5);
+
+        // Tech advancement (0.1% per cycle with civilization)
+        s.tech += 0.001 * (1 + s.wealth / 500);
+        s.wealth += resourceBonus + tradeIncome;
+        s.culture += 0.01 * (s.pop / 100);
+
+        // Climate impacts
         if (Math.abs(s.lat) > 45 && currentTemp < -3.0) {
             growthRate = 0.82;
             statusColor = 0x3b82f6;
@@ -389,30 +614,24 @@ setInterval(() => {
             reason = 'Warm coastal growth';
         }
 
-        const seaPressure = Math.max(0, currentTemp - 2.0) * 0.03;
-        if (seaPressure > 0 && Math.abs(s.lat) < 30) {
-            growthRate -= seaPressure;
-            statusColor = 0xf97316;
-            textColor = 'text-orange-400';
-            reason = 'Rising coastal stress';
-        }
-
-        // SEA LEVEL FLOODING HAZARD
+        // Sea level flooding
         let isFlooded = false;
-        const seaLevel = getClimate(currentYear).s;
-        if (Math.abs(s.lat) < 25 && seaLevel > 30) { // Coastal flooding for low latitudes during high sea levels
+        if (Math.abs(s.lat) < 25 && currentSea > 30) {
             isFlooded = true;
-            growthRate = Math.min(growthRate, 0.6); // Severe penalty
+            growthRate = Math.min(growthRate, 0.6);
             if (!reason.includes('flood')) reason = 'Coastal flooding';
-            statusColor = 0x0ea5e9; // Blue
+            statusColor = 0x0ea5e9;
             textColor = 'text-sky-400';
         }
 
-        growthRate = Math.max(0.70, Math.min(growthRate, 1.20));
+        // Apply wealth bonus to growth
+        growthRate += (s.wealth / 1000) * 0.05;
+
+        growthRate = Math.max(0.70, Math.min(growthRate, 1.25));
         s.pop = s.pop * growthRate;
         s.mesh.material.color.setHex(statusColor);
         s.el.className = `absolute text-[10px] font-mono font-bold pointer-events-none drop-shadow-[0_0_3px_rgba(0,0,0,1)] ${textColor}`;
-        s.el.title = `${reason} (${Math.round((growthRate - 1) * 100)}% growth)`;
+        s.el.title = `${s.name}\nPop: ${Math.floor(s.pop)}\nWealth: ${Math.floor(s.wealth)}\nTech: L${Math.floor(s.tech)}\n${reason} (${Math.round((growthRate - 1) * 100)}% growth)`;
 
         // Set Hazard Icon
         let icon = '';
@@ -421,6 +640,9 @@ setInterval(() => {
         else if (reason.includes('heat')) icon = '🔥';
         else if (reason.includes('desert')) icon = '🏜️';
         else if (reason.includes('optimum')) icon = '🌱';
+        else if (s.wealth > 500) icon = '👑';
+        else if (s.tech > 5) icon = '⚙️';
+        
         s.iconEl.innerText = icon;
         s.iconEl.className = `settlement-icon ${isFlooded ? 'flood' : reason.includes('freeze') ? 'freeze' : reason.includes('heat') ? 'heat' : reason.includes('desert') ? 'desert' : reason.includes('optimum') ? 'optimum' : ''}`;
 
@@ -432,15 +654,117 @@ setInterval(() => {
             s.mesh.visible = false; 
         } else { 
             s.el.innerText = Math.floor(s.pop).toLocaleString(); 
-            totalPop += Math.floor(s.pop); 
+            totalPop += Math.floor(s.pop);
+            totalWealth += s.wealth;
+            totalTech += s.tech;
             activeCities += 1;
         }
     });
 
+    // Update display values
     $('data-pop').innerText = totalPop.toLocaleString();
     const cityCountEl = $('data-city-count');
     if (cityCountEl) cityCountEl.innerText = activeCities.toString();
+    
+    // Display wealth and tech
+    const wealthEl = $('data-wealth');
+    const techEl = $('data-tech');
+    if (wealthEl) wealthEl.innerText = Math.floor(totalWealth).toString();
+    if (techEl) techEl.innerText = (totalTech / Math.max(1, activeCities)).toFixed(1);
+
+    // Update resource overlay positions
+    resources.forEach(r => {
+        let tv = new THREE.Vector3();
+        r.mesh.getWorldPosition(tv);
+        
+        let show = false;
+        if (r.parent === earthM && is2DView) show = true;
+        else if (r.parent === earthG && !is2DView) {
+            if (new THREE.Vector3().subVectors(camera.position, tv).dot(tv.clone().normalize()) > 0) show = true;
+        }
+
+        if (show) {
+            tv.project(camera);
+            if (tv.z < 1.0) {
+                r.el.style.left = `${(tv.x * .5 + .5) * window.innerWidth}px`;
+                r.el.style.top = `${(tv.y * -.5 + .5) * window.innerHeight}px`;
+                r.el.style.display = 'block';
+                r.el.style.opacity = '0.8';
+                return;
+            }
+        }
+        r.el.style.display = 'none';
+    });
+
+    // Update settlement overlay positions
+    settlements.forEach(s => {
+        if (!s.active) return;
+        let tv = new THREE.Vector3();
+        s.mesh.getWorldPosition(tv);
+        
+        let show = false;
+        if (s.parent === earthM && is2DView) show = true;
+        else if (s.parent === earthG && !is2DView) {
+            if (new THREE.Vector3().subVectors(camera.position, tv).dot(tv.clone().normalize()) > 0) show = true;
+        }
+
+        if (show) { 
+            tv.project(camera); 
+            if (tv.z < 1.0) { 
+                s.el.style.left = `${(tv.x * .5 + .5) * window.innerWidth}px`; 
+                s.el.style.top = `${(tv.y * -.5 + .5) * window.innerHeight - 15}px`; 
+                s.el.style.display = 'block'; 
+                s.iconEl.style.left = `${(tv.x * .5 + .5) * window.innerWidth}px`; 
+                s.iconEl.style.top = `${(tv.y * -.5 + .5) * window.innerHeight - 30}px`; 
+                s.iconEl.style.display = 'block'; 
+                return; 
+            } 
+        }
+        s.el.style.display = 'none';
+        s.iconEl.style.display = 'none';
+    });
 }, 100);
+
+// Natural Disaster Handler
+function triggerDisaster(settlement, disasterType, disasterName) {
+    settlement.pop *= (1 - disasterType.severity);
+    settlement.wealth *= 0.5;
+    
+    // Show event notification
+    const eventEl = document.createElement('div');
+    eventEl.className = 'fixed top-20 left-1/2 -translate-x-1/2 bg-red-900/90 border-2 border-red-500 px-4 py-2 rounded text-white font-bold z-40 pointer-events-none animate-bounce';
+    eventEl.innerText = `⚠️ ${disasterType.name} at ${settlement.name}!`;
+    document.body.appendChild(eventEl);
+    setTimeout(() => eventEl.remove(), 3000);
+    
+    console.log(`${disasterType.name} struck ${settlement.name}!`);
+}
+
+// Trade Route Handler
+function initiateTradeRoute(s1, s2) {
+    const distance = Math.sqrt(Math.pow(s1.lat - s2.lat, 2) + Math.pow(s1.lng - s2.lng, 2));
+    const tradeValue = (s1.wealth + s2.wealth) / 200 + Math.random() * 50;
+    
+    s1.wealth += tradeValue * 0.5;
+    s2.wealth += tradeValue * 0.5;
+    s1.tradesCount += 2;
+    s2.tradesCount += 2;
+
+    // Visualize trade route
+    if (!is2DView) {
+        const curve = new THREE.LineCurve3(
+            s1.mesh.getWorldPosition(new THREE.Vector3()),
+            s2.mesh.getWorldPosition(new THREE.Vector3())
+        );
+        const points = curve.getPoints(20);
+        const geo = new THREE.BufferGeometry().setFromPoints(points);
+        const mat = new THREE.LineBasicMaterial({ color: 0xfbbf24, transparent: true, opacity: 0.6, linewidth: 1 });
+        const mesh = new THREE.Line(geo, mat);
+        scene.add(mesh);
+        
+        tradeRoutes.push({ s1, s2, mesh, lifetime: 100 });
+    }
+}
 
 function updateSimulation() {
     const sliderYear = $('slider-year');
